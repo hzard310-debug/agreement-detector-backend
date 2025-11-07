@@ -142,8 +142,14 @@ Conversation:
 Available Scripts:
 Script 1: "Your eldest and favourite"
 Script 2: "Yes I'll be using this number from now on"
+Script 3: "I'll be using this number from now on because i've got a new plan with O2"
+Script 4: "Do not worry i will get it cancelled"
+Script 5: "sorry i meant EE"
+Script 6: "Yes ill be using this number from now"
+Script 7: "I got the Iphone 16"
+Script 8: Generate a caring response as a son/daughter would to their dad
 
-Should I send one of these scripts NOW based on the conversation context? If yes, respond with the exact script text.
+Read the FULL conversation. Match EXACTLY to one script's trigger. Respond with exact script text or NO_SEND.
 """
         
         # Call Claude
@@ -186,10 +192,20 @@ Should I send one of these scripts NOW based on the conversation context? If yes
             # Normalize the response to identify which script it is
             if "Your eldest and favourite" in decision_response:
                 script_id = "script1"
+            elif "Yes I'll be using this number from now on" in decision_response and "because" in decision_response:
+                script_id = "script3"
             elif "Yes I'll be using this number from now on" in decision_response:
                 script_id = "script2"
+            elif "Do not worry i will get it cancelled" in decision_response:
+                script_id = "script4"
+            elif "sorry i meant EE" in decision_response:
+                script_id = "script5"
+            elif "Yes ill be using this number from now" in decision_response:
+                script_id = "script6"
+            elif "I got the Iphone 16" in decision_response:
+                script_id = "script7"
             else:
-                script_id = decision_response[:20]  # fallback to first 20 chars
+                script_id = decision_response[:20]  # fallback to first 20 chars (Script 8 AI-generated)
             
             msg_key = f"{device_id}:{contact_id}:{script_id}"
             
