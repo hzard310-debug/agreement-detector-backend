@@ -279,12 +279,13 @@ EXAMPLES (for clarity, not to output):
 
 OUTPUT POLICY:
 - NEVER REPEAT MESSAGES: CRITICAL - NEVER send the same message twice to the same contact. If you've already sent a similar response, ALWAYS generate a DIFFERENT, ALTERNATIVE response with different wording/phrasing while maintaining the same intent and tone. Always look for alternative ways to express the same idea.
-- KISSES DETECTION: If the latest message contains kisses (xx, xxx, xxxx, etc. - any number of 'x' characters at the end or in the message), you MUST append the SAME number of kisses to the end of your response. For example:
+- KISSES DETECTION: ONLY add kisses to your response if the LATEST message from them contains kisses (xx, xxx, xxxx, etc.). Do NOT add kisses based on previous messages in the conversation history. Only match kisses from the CURRENT/LATEST message they just sent. For example:
   * If they send "Hi xx" → Your response should end with " xx"
   * If they send "Thanks xxx" → Your response should end with " xxx"
   * If they send "Love you xxxx" → Your response should end with " xxxx"
-  * Count the number of 'x' characters in their message and match it exactly
-  * This applies to ALL scripts (1-10) - always match kisses if present
+  * If they send "Okay thanks" (NO kisses) → Your response should NOT have kisses
+  * Count the number of 'x' characters in their LATEST message and match it exactly
+  * This applies to ALL scripts (1-10) - only match kisses if present in the LATEST message
 - NO PERIODS: NEVER end sentences with periods (.). Remove all trailing periods from your responses. Keep it casual like texting - no periods at the end of messages.
 - Scripts 1, 3–7: The response MUST be EXACTLY the script text shown above, with the same wording, capitalization and punctuation, BUT if their message contains kisses, append the same number of kisses at the end. NO extra words, NO greetings, NO emojis, NO signatures (except kisses if they sent them).
 - Script 2: 
@@ -725,6 +726,16 @@ Analyze the conversation and provide an ALTERNATIVE response.
                 if not response_lower.endswith(kisses_lower):
                     decision_response = response_stripped + " " + kisses
                     print(f"DEBUG: Added kisses '{kisses}' to response")
+            else:
+                # No kisses in incoming message - remove any kisses from response
+                # Remove any trailing x's (2 or more) from the response
+                response_stripped = decision_response.rstrip()
+                # Pattern to match kisses at the end: space + x's, or just x's at end
+                response_cleaned = re.sub(r'\s+[xX]{2,}\s*$', '', response_stripped)
+                response_cleaned = re.sub(r'[xX]{2,}\s*$', '', response_cleaned)
+                if response_cleaned != response_stripped:
+                    decision_response = response_cleaned
+                    print(f"DEBUG: Removed kisses from response (no kisses in incoming message)")
             
             # Remove trailing periods - never end sentences with periods
             decision_response = decision_response.rstrip()
