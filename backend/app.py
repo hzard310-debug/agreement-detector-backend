@@ -35,15 +35,16 @@ Script 1 "Your eldest and favourite"
   NOT: "Is this Katie?" (that's Script 2 - has a specific name)
   NOT: "Are you James?" (that's Script 2 - has a specific name)
 
-Script 2 "Yes I'll be using this number from now on" OR AI-GENERATED for "or" questions
-  TRIGGER: They confirm identity with a NAME or ask about new number
-  Keywords: "is this [NAME]", "are you [NAME]", "is this your new number", "is this [NAME] or [NAME]", "[NAME] or [NAME]"
-  Examples: "is this james", "are you john", "is this your new number", "is this jermaine or katie?", "jermaine or katie?"
-  SPECIAL CASE: If they ask "is this [NAME1] or [NAME2]?" or "[NAME1] or [NAME2]?", respond with "it's [more feminine name]"
+Script 2 "Yes I'll be using this number from now on" OR AI-GENERATED for "or" questions OR "Yes please delete my old number as ill be using this number from now on"
+  TRIGGER: They confirm identity with a NAME, ask about new number, or ask if they should delete your old number
+  Keywords: "is this [NAME]", "are you [NAME]", "is this your new number", "is this [NAME] or [NAME]", "[NAME] or [NAME]", "should I delete your old number", "delete your old number", "delete old number"
+  Examples: "is this james", "are you john", "is this your new number", "is this jermaine or katie?", "jermaine or katie?", "should I delete your old number?", "Okay so should I delete your old number?"
+  SPECIAL CASE 1: If they ask "is this [NAME1] or [NAME2]?" or "[NAME1] or [NAME2]?", respond with "it's [more feminine name]"
     - Common feminine names: Katie, Kate, Katie, Sarah, Emma, Emily, Jessica, etc.
     - Common masculine names: Jermaine, James, John, Michael, David, etc.
     - If one name is clearly more feminine, use that one
     - Response format: "it's [feminine name]" (e.g., "it's Katie")
+  SPECIAL CASE 2: If they ask "should I delete your old number?" or similar questions about deleting the old number, respond with "Yes please delete my old number as ill be using this number from now on"
   NOT: Generic "who" questions
 
 Script 3 "I've got a new plan with O2 and decided to keep the new number"
@@ -189,7 +190,7 @@ PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - Else if contains "what phone"/"which phone"/"what device"/"what iphone"/"which model"/"what model"/"which iphone" → Script 7
 - Else if contains "new phone"/"got phone"/"new device" → Script 6
 - Else if contains "why"/"y"/"reason"/"what for" (especially "why have you"/"why did you"/"why do you" + "new number") → Script 3 (takes priority over name confirmation)
-- Else if contains "is this [name]"/"are you [name]"/"is this your new number" → Script 2 (takes priority over generic "who" questions)
+- Else if contains "is this [name]"/"are you [name]"/"is this your new number"/"should I delete your old number"/"delete your old number"/"delete old number" → Script 2 (takes priority over generic "who" questions)
 - Else if contains EXPLICIT how-are-you QUESTION (how are you/how you doing/you ok/you alright/how's everything/how are things/hope you are doing/hope you're doing/hope you doing well) - NOT responses like "good thanks"/"I'm fine" → Script 8 (takes priority over greetings)
 - Else if contains generic who (who/whos/who is/who r u/hu/whose) WITHOUT a specific name → Script 1
 - Else if contains simple greeting (hi/hello/hey/hi there/hello there/hi dad/hi mum/hello dad/hello mum) at start → Script 9
@@ -227,18 +228,20 @@ INTERNAL PROCESS (do not include in output):
   6. Contains "is this" followed by a WORD (not "who") → NAME_ID (check BEFORE generic "who")
   7. Contains "are you" followed by a WORD → NAME_ID (check BEFORE generic "who")
   8. Contains "is this your new number" → NAME_ID
-  9. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things"/"hope you are doing"/"hope you're doing"/"hope you doing well" question (NOT responses like "good thanks"/"I'm fine"/"doing well") → HOW_YOU (check entire message, not just start)
-  10. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" and WITHOUT a specific name → WHO
-  11. Contains "already with O2"/"thought you were O2" → ALREADY_O2
-  12. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there"/"hi dad"/"hi mum"/"hello dad"/"hello mum") at start of message AND no questions → GREETING
-  13. If message is ANY normal conversational message (request, question, statement, serious news, acknowledgment, etc.) that doesn't match any above → GENERAL_CONVERSATION
-  14. Otherwise (only for truly empty/unparseable messages) → NONE
+  9. Contains "should I delete your old number" or "delete your old number" or "delete old number" → NAME_ID
+  10. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things"/"hope you are doing"/"hope you're doing"/"hope you doing well" question (NOT responses like "good thanks"/"I'm fine"/"doing well") → HOW_YOU (check entire message, not just start)
+  11. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" and WITHOUT a specific name → WHO
+  12. Contains "already with O2"/"thought you were O2" → ALREADY_O2
+  13. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there"/"hi dad"/"hi mum"/"hello dad"/"hello mum") at start of message AND no questions → GREETING
+  14. If message is ANY normal conversational message (request, question, statement, serious news, acknowledgment, etc.) that doesn't match any above → GENERAL_CONVERSATION
+  15. Otherwise (only for truly empty/unparseable messages) → NONE
 - Then map: INAPPROPRIATE → NO_SEND (ignore and delete), TIME_WASTING → NO_SEND, WHO → Script 1, NAME_ID → Script 2, WHY → Script 3, CONTRACT → Script 4, ALREADY_O2 → Script 5, NEW_PHONE → Script 6, WHAT_PHONE → Script 7, HOW_YOU → Script 8, GREETING → Script 9, GENERAL_CONVERSATION → Script 10, NONE → NO_SEND
 
 EXAMPLES (for clarity, not to output):
 - Latest: "whos this??" → Class: WHO (generic who, no "is this", no specific name) → SEND Script 1
 - Latest: "Is this Katie?" → Class: NAME_ID ("is this" + word "Katie") → SEND Script 2 (NOT Script 1)
 - Latest: "is this jermaine" → Class: NAME_ID ("is this" + word "jermaine") → SEND Script 2
+- Latest: "Okay so should I delete your old number?" → Class: NAME_ID (contains "should I delete your old number") → SEND Script 2 (response: "Yes please delete my old number as ill be using this number from now on")
 - Latest: "why have you got a new number?" → Class: WHY (contains "why" AS A QUESTION + "new number") → SEND Script 3 (NOT Script 2)
 - Latest: "why did you get a new number?" → Class: WHY (contains "why" AS A QUESTION + "new number") → SEND Script 3
 - Latest: "why do you have a new number?" → Class: WHY (contains "why" AS A QUESTION + "new number") → SEND Script 3
@@ -281,6 +284,7 @@ OUTPUT POLICY:
 - Scripts 1, 3–7: The response MUST be EXACTLY the script text shown above, with the same wording, capitalization and punctuation, BUT if their message contains kisses, append the same number of kisses at the end. NO extra words, NO greetings, NO emojis, NO signatures (except kisses if they sent them).
 - Script 2: 
   - If they ask "is this [NAME1] or [NAME2]?" or "[NAME1] or [NAME2]?", respond with "it's [more feminine name]" (e.g., "it's Katie" for "is this jermaine or katie?")
+  - If they ask "should I delete your old number?" or similar questions about deleting the old number, respond with "Yes please delete my old number as ill be using this number from now on"
   - Otherwise, the response MUST be EXACTLY "Yes I'll be using this number from now on"
   - If their message contains kisses, append the same number of kisses at the end
   - NO extra words, NO greetings, NO emojis, NO signatures (except kisses if they sent them)
@@ -500,10 +504,10 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 if script_key == "script4":
                     return not re.search(r"\b(contract|cancel|old plan|payment plan)\b", latest, re.IGNORECASE)
                 if script_key == "script2":
-                    # Match "is this [name]" or "are you [name]" or "is this your new number"
+                    # Match "is this [name]" or "are you [name]" or "is this your new number" or "delete old number"
                     # Handle names with any case and optional punctuation at the end
                     # Use [a-zA-Z]+ to match names regardless of case (character classes don't respect IGNORECASE)
-                    pattern = r"\b(is this [a-zA-Z]+|are you [a-zA-Z]+|is this your new number)[\s\?\!\.]*"
+                    pattern = r"\b(is this [a-zA-Z]+|are you [a-zA-Z]+|is this your new number|should I delete your old number|delete your old number|delete old number)[\s\?\!\.]*"
                     return not re.search(pattern, latest, re.IGNORECASE)
                 if script_key == "script1":
                     return not re.search(r"\bwho(['\s]|$)|\bwhos\b|\bwho is\b", latest, re.IGNORECASE)
