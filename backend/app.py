@@ -35,10 +35,15 @@ Script 1 "Your eldest and favourite"
   NOT: "Is this Katie?" (that's Script 2 - has a specific name)
   NOT: "Are you James?" (that's Script 2 - has a specific name)
 
-Script 2 "Yes I'll be using this number from now on"
+Script 2 "Yes I'll be using this number from now on" OR AI-GENERATED for "or" questions
   TRIGGER: They confirm identity with a NAME or ask about new number
-  Keywords: "is this [NAME]", "are you [NAME]", "is this your new number"
-  Examples: "is this james", "are you john", "is this your new number"
+  Keywords: "is this [NAME]", "are you [NAME]", "is this your new number", "is this [NAME] or [NAME]", "[NAME] or [NAME]"
+  Examples: "is this james", "are you john", "is this your new number", "is this jermaine or katie?", "jermaine or katie?"
+  SPECIAL CASE: If they ask "is this [NAME1] or [NAME2]?" or "[NAME1] or [NAME2]?", respond with "it's [more feminine name]"
+    - Common feminine names: Katie, Kate, Katie, Sarah, Emma, Emily, Jessica, etc.
+    - Common masculine names: Jermaine, James, John, Michael, David, etc.
+    - If one name is clearly more feminine, use that one
+    - Response format: "it's [feminine name]" (e.g., "it's Katie")
   NOT: Generic "who" questions
 
 Script 3 "I've got a new plan with O2 and decided to keep the new number"
@@ -273,7 +278,12 @@ OUTPUT POLICY:
   * Count the number of 'x' characters in their message and match it exactly
   * This applies to ALL scripts (1-10) - always match kisses if present
 - NO PERIODS: NEVER end sentences with periods (.). Remove all trailing periods from your responses. Keep it casual like texting - no periods at the end of messages.
-- Scripts 1–7: The response MUST be EXACTLY the script text shown above, with the same wording, capitalization and punctuation, BUT if their message contains kisses, append the same number of kisses at the end. NO extra words, NO greetings, NO emojis, NO signatures (except kisses if they sent them).
+- Scripts 1, 3–7: The response MUST be EXACTLY the script text shown above, with the same wording, capitalization and punctuation, BUT if their message contains kisses, append the same number of kisses at the end. NO extra words, NO greetings, NO emojis, NO signatures (except kisses if they sent them).
+- Script 2: 
+  - If they ask "is this [NAME1] or [NAME2]?" or "[NAME1] or [NAME2]?", respond with "it's [more feminine name]" (e.g., "it's Katie" for "is this jermaine or katie?")
+  - Otherwise, the response MUST be EXACTLY "Yes I'll be using this number from now on"
+  - If their message contains kisses, append the same number of kisses at the end
+  - NO extra words, NO greetings, NO emojis, NO signatures (except kisses if they sent them)
 - Script 8 (How Are You): Respond only with the message content (no preambles). Mirror length (sentence vs short paragraph), keep warm and low‑key, no emojis, no exclamation spam, and DO NOT mention the new number unless they asked. If their message contains kisses, append the same number of kisses at the end.
 - Script 9 (Greeting): Generate a friendly, natural greeting response. Keep it brief (1-2 sentences), warm and casual, no emojis. Do NOT mention the new number or any scripts. If their message contains kisses, append the same number of kisses at the end.
 - Script 10 (General Conversation - ALL MESSAGES): Generate a natural, appropriate, caring response to their message. If their message contains kisses, append the same number of kisses at the end. 
@@ -575,13 +585,40 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
 
         # Process response: detect kisses and remove trailing periods
         if decision_action == "SEND" and decision_response:
-            # Detect kisses (x's) at the end of the incoming message
-            kisses_match = re.search(r'([xX]+)\s*$', latest_inbound)
-            if kisses_match:
-                kisses = kisses_match.group(1)
+            # Detect kisses (x's) in the incoming message
+            kisses = None
+            latest_clean = latest_inbound.strip() if latest_inbound else ""
+            
+            if latest_clean:
+                # First, try to find x's at the end of the message (most common case)
+                # Pattern: x's at the end, possibly with spaces or punctuation before them
+                end_patterns = [
+                    r'([xX]{2,})\s*$',  # xx at end
+                    r'\s+([xX]{2,})\s*$',  # space then xx at end
+                    r'([xX]{2,})[\.\?\!]*\s*$',  # xx with punctuation at end
+                ]
+                
+                for pattern in end_patterns:
+                    end_match = re.search(pattern, latest_clean, re.MULTILINE)
+                    if end_match:
+                        kisses = end_match.group(1)
+                        break
+                
+                # If not found at end, try to find any sequence of x's (2 or more) anywhere
+                if not kisses:
+                    any_match = re.search(r'([xX]{2,})', latest_clean)
+                    if any_match:
+                        kisses = any_match.group(1)
+            
+            if kisses:
                 # Append kisses to response if not already present
-                if not decision_response.rstrip().endswith(kisses):
-                    decision_response = decision_response.rstrip() + " " + kisses
+                response_stripped = decision_response.rstrip()
+                # Check if response already ends with the same kisses (case-insensitive)
+                kisses_lower = kisses.lower()
+                response_lower = response_stripped.lower()
+                if not response_lower.endswith(kisses_lower):
+                    decision_response = response_stripped + " " + kisses
+                    print(f"DEBUG: Added kisses '{kisses}' to response")
             
             # Remove trailing periods - never end sentences with periods
             decision_response = decision_response.rstrip()
