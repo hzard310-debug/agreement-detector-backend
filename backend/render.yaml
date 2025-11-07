@@ -3,8 +3,8 @@ services:
     name: agreement-detector-api
     runtime: python
     pythonVersion: 3.11
-    buildCommand: pip install --upgrade pip && pip install -r backend/requirements.txt
-    startCommand: cd backend && gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
     envVars:
       - key: CLAUDE_API_KEY
         scope: run
