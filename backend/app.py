@@ -67,9 +67,11 @@ Triggers: What phone questions (with typo variants)
 → Script 7
 
 Script 8: AI-generated (son/daughter to dad tone)
-Triggers: How are you questions (with typo variants)
-- "how are you", "how are we", "how you doing", "how you been", "you alright"
-- Typos: "hw r u", "how u doin", "hows it goin", "ur good"
+Triggers: Message contains "how" + any greeting word
+- EXAMPLES: "how are you", "how you doing", "how are we", "how you been", "how's everything"
+- EXAMPLES: "you alright", "you good", "u ok", "everything ok"
+- Typos work: "hw r u", "how u doin", "hows it goin", "ur good", "u alrite"
+KEY RULE: If asking about wellbeing/how someone is = Generate caring response like son/daughter to dad
 → AI generates natural response as son/daughter to dad
 
 Always respond with JSON:
