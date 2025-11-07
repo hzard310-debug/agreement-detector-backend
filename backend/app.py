@@ -40,9 +40,10 @@ Script 2 "Yes I'll be using this number from now on"
   NOT: Generic "who" questions
 
 Script 3 "I'll be using this number from now on because i've got a new plan with O2"
-  TRIGGER: They ask WHY
-  Keywords: why, y, reason, what for
-  Example: "why?" or "reason?"
+  TRIGGER: They ask WHY you got a new number or WHY you're using this number
+  Keywords: "why", "y", "reason", "what for", "why have you", "why did you", "why do you"
+  Examples: "why?", "why have you got a new number?", "why did you get a new number?", "what for?", "reason?"
+  CRITICAL: If the message contains "why" (especially "why have you got" or "why did you get" or "why do you have" + "new number"), this is Script 3, NOT Script 2
 
 Script 4 "Do not worry i will get it cancelled"
   TRIGGER: They mention contract/cancellation
@@ -111,10 +112,10 @@ PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - If latest contains "contract"/"cancel"/"old plan"/"payment plan" → Script 4
 - Else if contains "what phone"/"which phone"/"what device"/"what iphone" → Script 7
 - Else if contains "new phone"/"got phone"/"new device" → Script 6
+- Else if contains "why"/"y"/"reason"/"what for" (especially "why have you"/"why did you"/"why do you" + "new number") → Script 3 (takes priority over name confirmation)
 - Else if contains "is this [name]"/"are you [name]"/"is this your new number" → Script 2
 - Else if contains EXPLICIT how-are-you question (how are you/how you doing/you ok/you alright/how's everything/how are things) ANYWHERE in message → Script 8 (takes priority over greetings)
 - Else if contains generic who (who/whos/who is/who r u/hu/whose) → Script 1
-- Else if contains direct why (why/y/reason/what for) → Script 3
 - Else if contains simple greeting (hi/hello/hey/hi there/hello there) at start → Script 9
 - Otherwise → NO_SEND
 
@@ -125,12 +126,12 @@ INTERNAL PROCESS (do not include in output):
 - Classify the latest message into ONE of: WHO | NAME_ID | WHY | CONTRACT | ALREADY_O2 | NEW_PHONE | WHAT_PHONE | HOW_YOU | GREETING | NONE
 - Classification rules (check in this order - read ENTIRE message):
   1. Contains "contract"/"cancel"/"old plan"/"payment plan" → CONTRACT
-  2. Contains "is this" followed by a WORD (not "who") → NAME_ID
-  3. Contains "are you" followed by a WORD → NAME_ID
-  4. Contains "is this your new number" → NAME_ID
-  5. Contains "what phone"/"which phone"/"what device" → WHAT_PHONE
-  6. Contains "new phone"/"got phone"/"new device" → NEW_PHONE
-  7. Contains "why"/"y"/"reason"/"what for" → WHY
+  2. Contains "what phone"/"which phone"/"what device" → WHAT_PHONE
+  3. Contains "new phone"/"got phone"/"new device" → NEW_PHONE
+  4. Contains "why"/"y"/"reason"/"what for" (especially "why have you"/"why did you"/"why do you" + "new number") → WHY (check before name confirmation)
+  5. Contains "is this" followed by a WORD (not "who") → NAME_ID
+  6. Contains "are you" followed by a WORD → NAME_ID
+  7. Contains "is this your new number" → NAME_ID
   8. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things" ANYWHERE in message → HOW_YOU (check entire message, not just start)
   9. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" → WHO
   10. Contains "already with O2"/"thought you were O2" → ALREADY_O2
@@ -141,6 +142,7 @@ INTERNAL PROCESS (do not include in output):
 EXAMPLES (for clarity, not to output):
 - Latest: "whos this??" → Class: WHO (generic who, no "is this") → SEND Script 1
 - Latest: "is this jermaine" → Class: NAME_ID ("is this" + word "jermaine") → SEND Script 2
+- Latest: "why have you got a new number?" → Class: WHY (contains "why" + "new number") → SEND Script 3
 - Latest: "what about the contract i pay for" → Class: CONTRACT (contains "contract") → SEND Script 4
 - Latest: "Oh hi James how are you, please don't forget the milk" → Class: HOW_YOU (contains "how are you" anywhere in message) → SEND Script 8 (AI-generated response)
 - Latest: "Hi James" → Class: GREETING (simple greeting, no questions) → SEND Script 9 (AI-generated greeting)
