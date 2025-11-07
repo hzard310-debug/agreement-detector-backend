@@ -93,7 +93,7 @@ Should I send this script NOW based on the conversation context? If yes, send it
         
         # Call Claude
         message = client.messages.create(
-            model="claude-3-5-sonnet-latest",
+            model="claude-3-opus-20240229",
             max_tokens=200,
             system=SYSTEM_PROMPT,
             messages=[
