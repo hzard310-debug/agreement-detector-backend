@@ -101,22 +101,24 @@ RESPOND WITH JSON:
 
 INTERNAL PROCESS (do not include in output):
 - Classify the latest message into ONE of: WHO | NAME_ID | WHY | CONTRACT | ALREADY_O2 | NEW_PHONE | WHAT_PHONE | HOW_YOU | NONE
-- Then map strictly:
-  WHO → Script 1
-  NAME_ID → Script 2
-  WHY → Script 3
-  CONTRACT → Script 4
-  ALREADY_O2 → Script 5
-  NEW_PHONE → Script 6
-  WHAT_PHONE → Script 7
-  HOW_YOU → Script 8
-  NONE → NO_SEND
-- Precedence if overlapping cues appear: CONTRACT > WHAT_PHONE > NEW_PHONE > NAME_ID > WHO > WHY > HOW_YOU
+- Classification rules (check in this order):
+  1. Contains "contract"/"cancel"/"old plan"/"payment plan" → CONTRACT
+  2. Contains "is this" followed by a WORD (not "who") → NAME_ID
+  3. Contains "are you" followed by a WORD → NAME_ID
+  4. Contains "is this your new number" → NAME_ID
+  5. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" → WHO
+  6. Contains "what phone"/"which phone"/"what device" → WHAT_PHONE
+  7. Contains "new phone"/"got phone"/"new device" → NEW_PHONE
+  8. Contains "why"/"y"/"reason"/"what for" → WHY
+  9. Contains "how are you"/"you ok"/"you alright" → HOW_YOU
+  10. Contains "already with O2"/"thought you were O2" → ALREADY_O2
+  11. Otherwise → NONE
+- Then map: WHO → Script 1, NAME_ID → Script 2, WHY → Script 3, CONTRACT → Script 4, ALREADY_O2 → Script 5, NEW_PHONE → Script 6, WHAT_PHONE → Script 7, HOW_YOU → Script 8, NONE → NO_SEND
 
 EXAMPLES (for clarity, not to output):
-- Latest: "whos this??" → Class: WHO → SEND Script 1
-- Latest: "is this James" → Class: NAME_ID → SEND Script 2
-- Latest: "what about the contract i pay for" → Class: CONTRACT → SEND Script 4
+- Latest: "whos this??" → Class: WHO (generic who, no "is this") → SEND Script 1
+- Latest: "is this jermaine" → Class: NAME_ID ("is this" + word "jermaine") → SEND Script 2
+- Latest: "what about the contract i pay for" → Class: CONTRACT (contains "contract") → SEND Script 4
 
 OUTPUT POLICY:
 - Scripts 1–7: The response MUST be EXACTLY the script text shown above, with the same wording, capitalization and punctuation. NO extra words, NO greetings, NO emojis, NO signatures.
@@ -150,9 +152,11 @@ def get_response():
         turns = data.get("turns", [])
         state = data.get("state", {})
         
-        # Build conversation for Claude
+        # Build conversation for Claude and capture latest inbound message text
+        latest_inbound = ""
         if turns:
             conversation_lines = []
+            parsed_turns = []
             for t in turns:
                 # Handle both dict and string formats
                 if isinstance(t, dict):
@@ -169,15 +173,28 @@ def get_response():
                         continue
                 else:
                     continue
+
+                parsed_turns.append({'role': role, 'text': text})
                 prefix = 'You' if role == 'you' else 'Them'
                 conversation_lines.append(f"{prefix}: {text}")
+
+            # Walk backwards to find most recent inbound message
+            for turn in reversed(parsed_turns):
+                role = (turn.get('role') or '').lower()
+                text = turn.get('text') or ''
+                if role == 'them' and text.strip():
+                    latest_inbound = text
+                    break
+
             conversation_text = "\n".join(conversation_lines) if conversation_lines else "(No previous conversation history)"
         else:
             conversation_text = "(No previous conversation history)"
-        
+
+        if not latest_inbound:
+            latest_inbound = "(no inbound message)"
+
         # Build user message for Claude
-        # Extract latest message
-        latest_msg = conversation_text.split('\n')[-1] if conversation_text else "(no message)"
+        latest_msg = latest_inbound
         latest_norm = re.sub(r'[^a-z0-9 ]+', '', latest_msg.lower()) if latest_msg else ""
         
         user_message = f"""
