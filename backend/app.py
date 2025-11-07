@@ -1,5 +1,4 @@
 # SMS Automation Backend - Agreement Detector API
-# Auto-deploy on push
 from flask import Flask, request, jsonify
 import anthropic
 import os
