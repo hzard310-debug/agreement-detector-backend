@@ -70,9 +70,14 @@ Script 7 "I got the Iphone 16"
   NOT: "did you get" (that's Script 6)
 
 Script 8 AI-GENERATED (How Are You)
-  TRIGGER: They EXPLICITLY ask HOW YOU ARE (not just greetings)
+  TRIGGER: They EXPLICITLY ask HOW YOU ARE (not just greetings, not responses/acknowledgments)
   Keywords: "how are you", "how you doing", "you ok", "you alright", "how's everything", "how are things", "how have you been"
-  Examples that trigger: "how are you", "how you doing", "hope you are doing well", "how are things"
+  Examples that trigger: "how are you", "how you doing", "hope you are doing well", "how are things", "how have you been?"
+  Examples that DO NOT trigger: "Good thanks", "I'm fine", "Doing well", "Alright", "Okay" - these are responses/acknowledgments, NOT questions asking how you are
+  CRITICAL: Only trigger if they are ASKING a question about how you are. Do NOT trigger on:
+    - Responses to your "how are you" question (e.g., "Good thanks", "I'm fine", "Doing well")
+    - Simple acknowledgments (e.g., "Thanks", "Okay", "Alright")
+    - Statements about themselves (e.g., "I'm good", "I'm fine")
   Action: Generate a natural caring response as a son/daughter would to dad
   Length & form: Mirror the sender's latest message length and form
     - If their latest message is a single short sentence, reply with one short sentence
@@ -99,13 +104,15 @@ Script 9 AI-GENERATED (Greeting Response)
     - Do NOT mention the new number or any scripts unless they ask
 
 Script 10 AI-GENERATED (General Conversation)
-  TRIGGER: They send a normal conversational message that doesn't match any other script (requests, questions, statements, etc.)
-  Examples: "Can you get me a milk from the shop?", "What time are you coming?", "Don't forget to...", "Thanks", "See you later", etc.
+  TRIGGER: They send a normal conversational message that doesn't match any other script (requests, questions, statements, acknowledgments, etc.)
+  Examples: "Can you get me a milk from the shop?", "Can you please get me milk on the way back home please", "What time are you coming?", "Don't forget to...", "Thanks", "See you later", "Good thanks", "I'm fine", etc.
+  CRITICAL: This is the DEFAULT script for any normal conversation that doesn't match Scripts 1-9
   Action: Generate a natural, appropriate response as a son/daughter would to dad/mum
   Length & form: Match their message length and tone
     - If they ask a question, answer naturally
-    - If they make a request, acknowledge it appropriately (e.g., "Sure", "Okay", "Will do")
+    - If they make a request (e.g., "Can you get me..."), acknowledge it appropriately (e.g., "Sure", "Okay", "Will do", "No problem")
     - If they make a statement, respond conversationally
+    - If they give a response/acknowledgment (e.g., "Good thanks"), respond naturally or use NO_SEND if no response needed
     - Keep it brief and natural
   Tone & content:
     - Natural, conversational, appropriate to the relationship (son/daughter to parent)
@@ -124,7 +131,7 @@ DECISION PROCESS:
 6. Respond as instructed
 
 CRITICAL: When a message contains multiple elements, identify the PRIMARY question or intent:
-- If it contains "how are you" → This is the PRIMARY intent → Script 8
+- If it contains "how are you" AS A QUESTION → This is the PRIMARY intent → Script 8
 - If it contains "why" (especially "why have you"/"why did you"/"why do you" + "new number") → This is the PRIMARY intent → Script 3
 - If it contains "is this [name]" or "are you [name]" → This is identity confirmation → Script 2 (NOT Script 1, even if it starts with "is this")
 - If it contains generic "who" WITHOUT a specific name → This is Script 1
@@ -132,6 +139,7 @@ CRITICAL: When a message contains multiple elements, identify the PRIMARY questi
 - Read the ENTIRE message, not just the first few words
 - Question words (why, what, how, who) take priority over simple statements or greetings
 - IMPORTANT: "Is this Katie?" is Script 2 (name confirmation), NOT Script 1 (generic who)
+- IMPORTANT: "Good thanks", "I'm fine", "Doing well" are RESPONSES, NOT questions asking "how are you" → Use Script 10 or NO_SEND, NOT Script 8
 
 PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - If latest contains "contract"/"cancel"/"old plan"/"payment plan" → Script 4
@@ -139,11 +147,12 @@ PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - Else if contains "new phone"/"got phone"/"new device" → Script 6
 - Else if contains "why"/"y"/"reason"/"what for" (especially "why have you"/"why did you"/"why do you" + "new number") → Script 3 (takes priority over name confirmation)
 - Else if contains "is this [name]"/"are you [name]"/"is this your new number" → Script 2 (takes priority over generic "who" questions)
-- Else if contains EXPLICIT how-are-you question (how are you/how you doing/you ok/you alright/how's everything/how are things) ANYWHERE in message → Script 8 (takes priority over greetings)
+- Else if contains EXPLICIT how-are-you QUESTION (how are you/how you doing/you ok/you alright/how's everything/how are things) - NOT responses like "good thanks"/"I'm fine" → Script 8 (takes priority over greetings)
 - Else if contains generic who (who/whos/who is/who r u/hu/whose) WITHOUT a specific name → Script 1
 - Else if contains simple greeting (hi/hello/hey/hi there/hello there/hi dad/hi mum/hello dad/hello mum) at start → Script 9
-- Else if message is a normal conversational message (request, question, statement, etc.) that doesn't match above → Script 10 (AI-generated natural response)
-- Otherwise → NO_SEND
+- Else if message is a normal conversational message (request like "Can you get me...", question, statement, acknowledgment, etc.) that doesn't match above → Script 10 (AI-generated natural response)
+- IMPORTANT: If the message doesn't match Scripts 1-9, it should be Script 10 (general conversation), NOT NO_SEND
+- Only use NO_SEND for truly empty or unparseable messages
 
 RESPOND WITH JSON:
 {"action": "SEND" or "NO_SEND", "response": "exact text or generated", "reasoning": "which script and why"}
@@ -158,7 +167,7 @@ INTERNAL PROCESS (do not include in output):
   5. Contains "is this" followed by a WORD (not "who") → NAME_ID (check BEFORE generic "who")
   6. Contains "are you" followed by a WORD → NAME_ID (check BEFORE generic "who")
   7. Contains "is this your new number" → NAME_ID
-  8. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things" ANYWHERE in message → HOW_YOU (check entire message, not just start)
+  8. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things" question (NOT responses like "good thanks"/"I'm fine"/"doing well") → HOW_YOU (check entire message, not just start)
   9. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" and WITHOUT a specific name → WHO
   10. Contains "already with O2"/"thought you were O2" → ALREADY_O2
   11. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there"/"hi dad"/"hi mum"/"hello dad"/"hello mum") at start of message AND no questions → GREETING
@@ -179,6 +188,8 @@ EXAMPLES (for clarity, not to output):
 - Latest: "Hi dad" → Class: GREETING (simple greeting with relationship term) → SEND Script 9 (AI-generated greeting)
 - Latest: "Hello" → Class: GREETING (simple greeting) → SEND Script 9 (AI-generated greeting)
 - Latest: "how are you" → Class: HOW_YOU (explicit question) → SEND Script 8 (AI-generated response)
+- Latest: "Good thanks" → Class: GENERAL_CONVERSATION (response/acknowledgment, NOT a question) → SEND Script 10 (AI-generated natural response) or NO_SEND
+- Latest: "I'm fine" → Class: GENERAL_CONVERSATION (response, NOT a question) → SEND Script 10 or NO_SEND
 - Latest: "Can you get me a milk from the shop?" → Class: GENERAL_CONVERSATION (normal request) → SEND Script 10 (AI-generated natural response)
 - Latest: "What time are you coming?" → Class: GENERAL_CONVERSATION (normal question) → SEND Script 10 (AI-generated natural response)
 - Latest: "Thanks" → Class: GENERAL_CONVERSATION (acknowledgment) → SEND Script 10 (AI-generated natural response)
@@ -382,8 +393,9 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                         return False  # Script 8 keywords present
                     if re.search(r"^(hi|hello|hey|hi there|hello there|hi dad|hi mum|hello dad|hello mum)\b", latest, re.IGNORECASE):
                         return False  # Script 9 keywords present
-                    # If it's AI-generated and doesn't match Script 8 or 9, it's likely Script 10 (general conversation) - allow it
-                    return False  # Script 10 (general conversation) - allow natural responses
+                    # If it's AI-generated and doesn't match Script 8 or 9, it's likely Script 10 (general conversation) - always allow it
+                    # Script 10 is for general conversation, so any message that doesn't match other scripts should be allowed
+                    return False  # Script 10 (general conversation) - always allow natural responses
                 return False
 
             if violates_priority(script_id, latest_msg.lower(), decision_response):
