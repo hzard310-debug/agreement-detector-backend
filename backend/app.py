@@ -2,8 +2,12 @@ from flask import Flask, request, jsonify
 import anthropic
 import os
 from datetime import datetime
+import json
 
 app = Flask(__name__)
+
+# Track sent messages to prevent duplicates: (device_id, contact_id, script) -> timestamp
+sent_tracker = {}
 
 # Initialize Claude client with API key from environment
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
@@ -11,35 +15,28 @@ if not CLAUDE_API_KEY:
     print("ERROR: CLAUDE_API_KEY environment variable not set!")
 client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
-# System prompt for the AI - INTELLIGENT CONVERSATION AUTOMATION
-SYSTEM_PROMPT = """You are an intelligent SMS automation assistant. You read conversation history and decide whether to send an appropriate response.
+# System prompt for the AI - RESPOND ONLY TO WHO QUESTIONS
+SYSTEM_PROMPT = """You are an SMS automation assistant. Your ONLY job is to respond to questions about who the sender is.
 
-Your job is to:
-1. Read the FULL conversation between the user and a contact
-2. Understand the context and conversation flow
-3. Decide if NOW is the right moment to send a response
-4. Generate or send the appropriate message based on context
+Your job:
+1. Read the last message from them
+2. Determine if they are asking WHO YOU ARE (e.g., "who's this?", "is this [name]?", "whos this", etc.)
+3. If they ARE asking who you are: return the provided script EXACTLY
+4. If they are NOT asking who you are: return NO_SEND
 
 Always respond with JSON:
 {
   "action": "SEND" or "NO_SEND",
-  "response": "the message to send, or empty if NO_SEND",
-  "reasoning": "brief explanation of why or why not"
+  "response": "the provided script if asking who, empty if NO_SEND",
+  "reasoning": "brief explanation"
 }
 
 Rules:
-- Be conversational and natural
-- Respond to messages that need a reply
-- Return NO_SEND if the conversation doesn't warrant a response
-- If the provided script fits the context, use it EXACTLY as provided
-- Otherwise, craft an appropriate response based on the conversation
-- Keep responses brief and natural
-
-Examples:
-- If they ask "whos this?" and script is "Your eldest and favourite", use that script
-- If they say "hey", respond naturally with a greeting
-- If they ask a question, answer it conversationally
-- If it's clearly spam or doesn't warrant reply, return NO_SEND
+- ONLY send if the latest message is asking who you are
+- Examples of "who are you" questions: "whos this", "who is this", "is this [name]", "who's this", "who dis"
+- If they ask anything else, return NO_SEND
+- If sending, use the provided script EXACTLY as given
+- Do NOT send for greetings, statements, or unrelated questions
 """
 
 @app.route('/respond', methods=['POST'])
@@ -137,10 +134,30 @@ Should I send this script NOW based on the conversation context? If yes, send it
                 "reasoning": "Could not parse Claude response"
             }
         
+        # Check for duplicates - prevent sending the same message to the same contact twice
+        decision_action = decision.get("action", "NO_SEND")
+        decision_response = decision.get("response", "")
+        
+        if decision_action == "SEND" and decision_response:
+            # Create unique key for this message
+            msg_key = f"{device_id}:{contact_id}:{script}"
+            
+            # Check if we've already sent this message
+            if msg_key in sent_tracker:
+                # Already sent before - don't send again per user rules
+                print(f"DUPLICATE: Already sent '{script}' to {contact_id}")
+                decision_action = "NO_SEND"
+                decision_response = ""
+                decision["reasoning"] = "Already sent this message to this contact (duplicate prevention)"
+            else:
+                # First time - record it
+                sent_tracker[msg_key] = datetime.now().isoformat()
+                print(f"TRACKED: Sent '{script}' to {contact_id}")
+        
         # Format response for Android app
         result = {
-            "action": decision.get("action", "NO_SEND"),
-            "response": decision.get("response", ""),
+            "action": decision_action,
+            "response": decision_response,
             "reasoning": decision.get("reasoning", ""),
             "timestamp": datetime.now().isoformat()
         }
