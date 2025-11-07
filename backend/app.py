@@ -124,11 +124,21 @@ def get_response():
         
         # Build user message for Claude
         user_message = f"""
-Device: {device_id}
-Contact: {contact_id}
+READ THE ENTIRE CONVERSATION BELOW CAREFULLY:
 
-Conversation:
 {conversation_text}
+
+---
+
+THIS IS THE MOST RECENT MESSAGE (what just came in):
+{conversation_text.split(chr(10))[-1] if conversation_text else "(no message)"}
+
+---
+
+BEFORE responding:
+1. Understand WHAT the person is asking about
+2. Check if you've ALREADY responded to this type of question in this conversation
+3. Make sure you're not sending the same script twice
 
 Available Scripts:
 Script 1: "Your eldest and favourite"
@@ -140,7 +150,12 @@ Script 6: "Yes ill be using this number from now"
 Script 7: "I got the Iphone 16"
 Script 8: Generate a caring response as a son/daughter would to their dad
 
-Read the FULL conversation. Match EXACTLY to one script's trigger. Respond with exact script text or NO_SEND.
+DECISION:
+- Read the FULL conversation
+- Understand what was ALREADY sent
+- Only respond if the question is NEW or DIFFERENT from before
+- If you already responded to this topic, send NO_SEND
+- If it's a new question that matches a script, send the script
 """
         
         # Call Claude
