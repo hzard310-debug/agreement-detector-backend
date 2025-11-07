@@ -107,6 +107,15 @@ Script 9 "Could you do me a favour please?"
   Action: Respond with EXACTLY "Could you do me a favour please?"
   NOT: Generic greetings or other messages that don't indicate agreement/acknowledgment
 
+Script 12 "I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,745 if that's okay?"
+  TRIGGER: They respond to "Could you do me a favour please?" with agreement, interest, or willingness to help
+  Keywords: "sure", "ok", "okay", "yes", "of course", "what is it", "what do you need", "what's the favour", "what favour", "tell me", "go ahead", "absolutely", "yeah", "yep", "yup", "what can i do", "how can i help", "what do you need help with", "what do you need help", "what help", "anything", "what is it", "what's up", "what's the matter", "what's wrong", "what's going on", "what's happening"
+  Examples: "sure", "ok", "okay", "yes", "of course", "what is it", "what do you need", "what's the favour", "what favour", "tell me", "go ahead", "absolutely", "yeah", "what can i do", "how can i help", "what do you need help with", "anything", "what's up"
+  CRITICAL: This script ONLY triggers if the previous message from "you" was "Could you do me a favour please?" (Script 9). Check conversation history to confirm.
+  CRITICAL: The response MUST be EXACTLY "I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,745 if that's okay?" - NEVER alter this message, NEVER change the amount, NEVER modify the wording.
+  Action: Respond with EXACTLY the payment request message above
+  NOT: Use this script if they haven't just received "Could you do me a favour please?" from you
+
 Script 10 AI-GENERATED (Greeting Response)
   TRIGGER: They send a simple greeting (Hi, Hello, Hey, Hi [name], Hello [name], Hi dad, Hi mum, etc.)
   Keywords: "hi", "hello", "hey", "hi there", "hey there", "hi dad", "hi mum", "hello dad", "hello mum"
@@ -204,6 +213,7 @@ PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - Else if contains "new phone"/"got phone"/"new device" → Script 6
 - Else if contains "why"/"y"/"reason"/"what for" (especially "why have you"/"why did you"/"why do you" + "new number") → Script 3 (takes priority over name confirmation)
 - Else if contains "is this [name]"/"are you [name]"/"is this your new number"/"should I delete your old number"/"delete your old number"/"delete old number"/"permanent number"/"temporary number"/"permanent"/"temporary"/"work number"/"personal number"/"work"/"personal"/"new permanent number"/"new temporary number" → Script 2 (takes priority over generic "who" questions)
+- Else if previous message from "you" was "Could you do me a favour please?" AND latest contains agreement/interest keywords (sure/ok/okay/yes/of course/what is it/what do you need/what's the favour/what favour/tell me/go ahead/absolutely/yeah/yep/yup/what can i do/how can i help/what do you need help with/what do you need help/what help/anything/what's up/what's the matter/what's wrong/what's going on/what's happening) → Script 12 (HIGHEST PRIORITY - payment request)
 - Else if contains EXPLICIT how-are-you QUESTION (how are you/how you doing/you ok/you alright/how's everything/how are things/hope you are doing/hope you're doing/hope you doing well) - NOT responses like "good thanks"/"I'm fine" → Script 8 (takes priority over greetings)
 - Else if contains agreement/acknowledgment keywords (ok/okay/ok thanks/okay thanks/number saved/saved/fine/sure/alright/will do/got it/done/sorted) OR thumbs up emoji (👍) → Script 9 (HIGH PRIORITY - overrides other scripts)
 - Else if contains generic who (who/whos/who is/who r u/hu/whose) WITHOUT a specific name → Script 1
@@ -245,14 +255,15 @@ INTERNAL PROCESS (do not include in output):
   9. Contains "should I delete your old number" or "delete your old number" or "delete old number" → NAME_ID
   10. Contains "permanent number" or "temporary number" or "permanent" or "temporary" or "new permanent number" or "new temporary number" or patterns like "this your new permanent number" or "this your permanent number" → NAME_ID
   11. Contains "work number" or "personal number" or "work" (in context of number) or "personal" (in context of number) → NAME_ID
-  12. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things"/"hope you are doing"/"hope you're doing"/"hope you doing well" question (NOT responses like "good thanks"/"I'm fine"/"doing well") → HOW_YOU (check entire message, not just start)
-  13. Contains agreement/acknowledgment keywords (ok/okay/ok thanks/okay thanks/number saved/saved/fine/sure/alright/will do/got it/done/sorted) OR thumbs up emoji (👍) → AGREEMENT (check BEFORE generic who and greetings)
-  14. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" and WITHOUT a specific name → WHO
-  15. Contains "already with O2"/"thought you were O2" → ALREADY_O2
-  16. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there"/"hi dad"/"hi mum"/"hello dad"/"hello mum") at start of message AND no questions → GREETING
-  17. If message is ANY normal conversational message (request, question, statement, serious news, acknowledgment, etc.) that doesn't match any above → GENERAL_CONVERSATION
-  18. Otherwise (only for truly empty/unparseable messages) → NONE
-- Then map: INAPPROPRIATE → NO_SEND (ignore and delete), TIME_WASTING → NO_SEND, WHO → Script 1, NAME_ID → Script 2, WHY → Script 3, CONTRACT → Script 4, ALREADY_O2 → Script 5, NEW_PHONE → Script 6, WHAT_PHONE → Script 7, HOW_YOU → Script 8, AGREEMENT → Script 9, GREETING → Script 10, GENERAL_CONVERSATION → Script 11, NONE → NO_SEND
+  12. If previous message from "you" was "Could you do me a favour please?" AND latest contains agreement/interest keywords (sure/ok/okay/yes/of course/what is it/what do you need/what's the favour/what favour/tell me/go ahead/absolutely/yeah/yep/yup/what can i do/how can i help/what do you need help with/what do you need help/what help/anything/what's up/what's the matter/what's wrong/what's going on/what's happening) → FAVOUR_RESPONSE (check BEFORE other agreement checks)
+  13. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things"/"hope you are doing"/"hope you're doing"/"hope you doing well" question (NOT responses like "good thanks"/"I'm fine"/"doing well") → HOW_YOU (check entire message, not just start)
+  14. Contains agreement/acknowledgment keywords (ok/okay/ok thanks/okay thanks/number saved/saved/fine/sure/alright/will do/got it/done/sorted) OR thumbs up emoji (👍) → AGREEMENT (check BEFORE generic who and greetings)
+  15. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" and WITHOUT a specific name → WHO
+  16. Contains "already with O2"/"thought you were O2" → ALREADY_O2
+  17. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there"/"hi dad"/"hi mum"/"hello dad"/"hello mum") at start of message AND no questions → GREETING
+  18. If message is ANY normal conversational message (request, question, statement, serious news, acknowledgment, etc.) that doesn't match any above → GENERAL_CONVERSATION
+  19. Otherwise (only for truly empty/unparseable messages) → NONE
+- Then map: INAPPROPRIATE → NO_SEND (ignore and delete), TIME_WASTING → NO_SEND, WHO → Script 1, NAME_ID → Script 2, WHY → Script 3, CONTRACT → Script 4, ALREADY_O2 → Script 5, NEW_PHONE → Script 6, WHAT_PHONE → Script 7, HOW_YOU → Script 8, AGREEMENT → Script 9, FAVOUR_RESPONSE → Script 12, GREETING → Script 10, GENERAL_CONVERSATION → Script 11, NONE → NO_SEND
 
 EXAMPLES (for clarity, not to output):
 - Latest: "whos this??" → Class: WHO (generic who, no "is this", no specific name) → SEND Script 1
@@ -271,6 +282,11 @@ EXAMPLES (for clarity, not to output):
 - Latest: "ok" → Class: AGREEMENT (contains "ok") → SEND Script 9 (response: "Could you do me a favour please?")
 - Latest: "👍" → Class: AGREEMENT (contains thumbs up emoji) → SEND Script 9 (response: "Could you do me a favour please?")
 - Latest: "ok 👍" → Class: AGREEMENT (contains "ok" and thumbs up emoji) → SEND Script 9 (response: "Could you do me a favour please?")
+- Latest: "sure" (after receiving "Could you do me a favour please?") → Class: FAVOUR_RESPONSE (previous message was Script 9 + contains "sure") → SEND Script 12 (response: "I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,745 if that's okay?")
+- Latest: "ok" (after receiving "Could you do me a favour please?") → Class: FAVOUR_RESPONSE (previous message was Script 9 + contains "ok") → SEND Script 12 (response: payment request)
+- Latest: "what is it" (after receiving "Could you do me a favour please?") → Class: FAVOUR_RESPONSE (previous message was Script 9 + contains "what is it") → SEND Script 12 (response: payment request)
+- Latest: "what do you need" (after receiving "Could you do me a favour please?") → Class: FAVOUR_RESPONSE (previous message was Script 9 + contains "what do you need") → SEND Script 12 (response: payment request)
+- Latest: "of course" (after receiving "Could you do me a favour please?") → Class: FAVOUR_RESPONSE (previous message was Script 9 + contains "of course") → SEND Script 12 (response: payment request)
 - Latest: "why have you got a new number?" → Class: WHY (contains "why" AS A QUESTION + "new number") → SEND Script 3 (NOT Script 2)
 - Latest: "why did you get a new number?" → Class: WHY (contains "why" AS A QUESTION + "new number") → SEND Script 3
 - Latest: "why do you have a new number?" → Class: WHY (contains "why" AS A QUESTION + "new number") → SEND Script 3
@@ -327,22 +343,26 @@ OUTPUT POLICY:
   - NO extra words, NO greetings, NO emojis, NO signatures (except kisses if they sent them)
 - Script 8 (How Are You): Respond only with the message content (no preambles). Mirror length (sentence vs short paragraph), keep warm and low‑key, no emojis, no exclamation spam, and DO NOT mention the new number unless they asked. If their message contains kisses, append the same number of kisses at the end.
 - Script 9 (Agreement/Acknowledgment): The response MUST be EXACTLY "Could you do me a favour please?" - NO variations, NO extra words, NO greetings, NO emojis. If their message contains kisses, append the same number of kisses at the end.
+- Script 12 (Favour Response - Payment Request): The response MUST be EXACTLY "I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,745 if that's okay?" - NEVER alter this message, NEVER change the amount (£1,745), NEVER modify the wording, NEVER add or remove anything. This message is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 10 (Greeting): Generate a friendly, natural greeting response. Keep it brief (1-2 sentences), warm and casual, no emojis. Do NOT mention the new number or any scripts. If their message contains kisses, append the same number of kisses at the end.
 - Script 11 (General Conversation - ALL MESSAGES): Generate a natural, appropriate, caring response to their message. If their message contains kisses, append the same number of kisses at the end. 
-  - For requests: Acknowledge helpfully (e.g., "Sure", "Okay", "Will do", "No problem")
+  - For requests or statements asking permission/acknowledgment: Keep it SHORT and CASUAL (e.g., "Okay", "Sure", "That's fine", "No problem", "Will do") - don't be wordy or overly enthusiastic
+    * "I am going to the shop if that's okay" → "Okay, that's fine" or "Sure, no problem" (NOT "Sure, no problem. I'll be happy to take care of that for you" - too wordy)
+    * "Can you pick up the kids?" → "Sure" or "Will do" (keep it brief)
   - For serious news: Respond with care, concern, support, and empathy - be appropriate to the seriousness
   - For questions: ANSWER THEM DIRECTLY and NATURALLY - like a child texting their parent:
     * "What would you like to eat for dinner?" → Simple, casual answer: "I'd like pasta" or "Chicken sounds good" or "Whatever you're making is fine"
     * "What time are you coming?" → Simple answer: "Around 6" or "I'll be there by 7"
     * Keep it casual and natural - don't overthink or be overly formal. A short, direct answer is better than a long explanation
     * NEVER use placeholders like [suggested meal idea] or [food] - always use actual, specific answers
-  - For statements: Respond conversationally to that specific statement
+  - For statements: Respond conversationally to that specific statement - keep it brief and natural
   - CRITICAL: Read the actual message content and respond to what they said, not generically
   - CRITICAL: Generate ACTUAL responses, NOT placeholders or template text - if you need to suggest something, suggest a REAL thing
   - CRITICAL: Keep it natural and casual - respond like you're texting your parent, not writing a formal letter
+  - CRITICAL: Keep responses SHORT - 1-2 sentences max for most messages. Don't be wordy or overly formal
   - Match their tone, length, and seriousness level
   - Keep it conversational, no emojis
-  - Respond as a son/daughter would to their parent in a normal family conversation - simple, casual, natural
+  - Respond as a son/daughter would to their parent in a normal family conversation - simple, casual, natural, BRIEF
   - Be ready to handle ANY type of message appropriately
   - Do NOT mention the new number or any scripts unless they explicitly ask
 - Never combine scripts or add commentary. Choose ONE script or NO_SEND.
@@ -465,6 +485,62 @@ def get_response():
         latest_msg = latest_inbound
         latest_norm = re.sub(r'[^a-z0-9 ]+', '', latest_msg.lower()) if latest_msg else ""
         
+        # Check for Script 12: Payment request after "Could you do me a favour please?"
+        # Check if previous message from "you" was Script 9
+        previous_was_favour_request = False
+        if parsed_turns:
+            # Find the last message from "you" before the current incoming message
+            for turn in reversed(parsed_turns):
+                role = (turn.get('role') or '').lower()
+                text = turn.get('text') or ''
+                if role == 'you' and text.strip():
+                    # Check if it's Script 9
+                    if "Could you do me a favour please" in text or "Could you do me a favour please?" in text:
+                        previous_was_favour_request = True
+                    break
+        
+        # Check if current message contains agreement/interest keywords for Script 12
+        script12_keywords = ["sure", "ok", "okay", "yes", "of course", "what is it", "what do you need", "what's the favour", "what favour", "tell me", "go ahead", "absolutely", "yeah", "yep", "yup", "what can i do", "how can i help", "what do you need help with", "what do you need help", "what help", "anything", "what's up", "what's the matter", "what's wrong", "what's going on", "what's happening"]
+        latest_lower = latest_msg.lower() if latest_msg else ""
+        contains_agreement_keyword = any(keyword in latest_lower for keyword in script12_keywords)
+        
+        # If both conditions are met, use Script 12 directly
+        if previous_was_favour_request and contains_agreement_keyword:
+            payment_message = "I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,745 if that's okay?"
+            
+            # Detect kisses and append if present
+            kisses = None
+            if latest_msg:
+                end_patterns = [
+                    r'([xX]{2,})\s*$',
+                    r'\s+([xX]{2,})\s*$',
+                    r'([xX]{2,})[\.\?\!]*\s*$',
+                ]
+                for pattern in end_patterns:
+                    end_match = re.search(pattern, latest_msg, re.MULTILINE)
+                    if end_match:
+                        kisses = end_match.group(1)
+                        break
+                if not kisses:
+                    any_match = re.search(r'([xX]{2,})', latest_msg)
+                    if any_match:
+                        kisses = any_match.group(1)
+            
+            if kisses:
+                payment_message = payment_message.rstrip() + " " + kisses
+            
+            # Remove trailing periods
+            payment_message = payment_message.rstrip()
+            while payment_message.endswith('.'):
+                payment_message = payment_message[:-1].rstrip()
+            
+            return jsonify({
+                "action": "SEND",
+                "response": payment_message,
+                "reasoning": "Script 12: Previous message was 'Could you do me a favour please?' and current message shows agreement/interest",
+                "timestamp": datetime.now().isoformat()
+            }), 200
+        
         user_message = f"""
 FULL CONVERSATION:
 {conversation_text}
@@ -543,6 +619,8 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 script_id = "script7"
             elif "Could you do me a favour please" in decision_response:
                 script_id = "script9"
+            elif "I need to make a payment today but can't for 24h" in decision_response and "£1,745" in decision_response:
+                script_id = "script12"
             else:
                 script_id = decision_response[:20]  # fallback to first 20 chars (Script 8, 10, or 11 AI-generated)
 
@@ -580,6 +658,12 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                     if "👍" in latest:
                         return False  # Thumbs up emoji found
                     return not re.search(r"\b(ok|okay|ok thanks|okay thanks|number saved|saved|fine|sure|alright|will do|got it|done|sorted)\b", latest, re.IGNORECASE)
+                if script_key == "script12":
+                    # Script 12: Payment request - check if previous message was Script 9 and current has agreement keywords
+                    # This is handled directly in code before Claude, but add guard for safety
+                    script12_keywords = ["sure", "ok", "okay", "yes", "of course", "what is it", "what do you need", "what's the favour", "what favour", "tell me", "go ahead", "absolutely", "yeah", "yep", "yup", "what can i do", "how can i help"]
+                    latest_lower = latest.lower()
+                    return not any(keyword in latest_lower for keyword in script12_keywords)
                 # For AI-generated responses (Script 8, 10, or 11), check if response matches expected pattern
                 if len(script_key) > 10:  # AI-generated response (first 20 chars)
                     # Check if it's likely Script 8 (how are you response) - response will be longer, conversational
