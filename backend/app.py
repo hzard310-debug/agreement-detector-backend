@@ -70,10 +70,26 @@ def get_response():
         
         # Build conversation for Claude
         if turns:
-            conversation_text = "\n".join([
-                f"{'You' if t.get('role') == 'you' else 'Them'}: {t.get('text', '')}"
-                for t in turns
-            ])
+            conversation_lines = []
+            for t in turns:
+                # Handle both dict and string formats
+                if isinstance(t, dict):
+                    role = t.get('role', 'them')
+                    text = t.get('text', '')
+                elif isinstance(t, str):
+                    # If it's a string, try to parse it as JSON
+                    try:
+                        import json as json_module
+                        t = json_module.loads(t)
+                        role = t.get('role', 'them')
+                        text = t.get('text', '')
+                    except:
+                        continue
+                else:
+                    continue
+                prefix = 'You' if role == 'you' else 'Them'
+                conversation_lines.append(f"{prefix}: {text}")
+            conversation_text = "\n".join(conversation_lines) if conversation_lines else "(No previous conversation history)"
         else:
             conversation_text = "(No previous conversation history)"
         
