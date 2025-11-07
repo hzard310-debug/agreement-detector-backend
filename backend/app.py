@@ -254,6 +254,7 @@ OUTPUT POLICY:
   * If they send "Love you xxxx" → Your response should end with " xxxx"
   * Count the number of 'x' characters in their message and match it exactly
   * This applies to ALL scripts (1-10) - always match kisses if present
+- NO PERIODS: NEVER end sentences with periods (.). Remove all trailing periods from your responses. Keep it casual like texting - no periods at the end of messages.
 - Scripts 1–7: The response MUST be EXACTLY the script text shown above, with the same wording, capitalization and punctuation, BUT if their message contains kisses, append the same number of kisses at the end. NO extra words, NO greetings, NO emojis, NO signatures (except kisses if they sent them).
 - Script 8 (How Are You): Respond only with the message content (no preambles). Mirror length (sentence vs short paragraph), keep warm and low‑key, no emojis, no exclamation spam, and DO NOT mention the new number unless they asked. If their message contains kisses, append the same number of kisses at the end.
 - Script 9 (Greeting): Generate a friendly, natural greeting response. Keep it brief (1-2 sentences), warm and casual, no emojis. Do NOT mention the new number or any scripts. If their message contains kisses, append the same number of kisses at the end.
@@ -526,6 +527,21 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 decision_response = ""
                 decision["reasoning"] = "Already sent this message to this contact (duplicate prevention)"
 
+        # Process response: detect kisses and remove trailing periods
+        if decision_action == "SEND" and decision_response:
+            # Detect kisses (x's) at the end of the incoming message
+            kisses_match = re.search(r'([xX]+)\s*$', latest_inbound)
+            if kisses_match:
+                kisses = kisses_match.group(1)
+                # Append kisses to response if not already present
+                if not decision_response.rstrip().endswith(kisses):
+                    decision_response = decision_response.rstrip() + " " + kisses
+            
+            # Remove trailing periods - never end sentences with periods
+            decision_response = decision_response.rstrip()
+            while decision_response.endswith('.'):
+                decision_response = decision_response[:-1].rstrip()
+        
         # Format response for Android app
         result = {
             "action": decision_action,
