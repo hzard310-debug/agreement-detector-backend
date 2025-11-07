@@ -1,9 +1,10 @@
 from flask import Flask, request, jsonify
 import anthropic
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import re
+import hashlib
 
 app = Flask(__name__)
 
@@ -152,6 +153,21 @@ def get_response():
         turns = data.get("turns", [])
         state = data.get("state", {})
         
+        # Clean out stale duplicate entries (older than 12 hours)
+        try:
+            cutoff = datetime.now() - timedelta(hours=12)
+            stale_keys = []
+            for key, ts in list(sent_tracker.items()):
+                try:
+                    if datetime.fromisoformat(ts) < cutoff:
+                        stale_keys.append(key)
+                except Exception:
+                    stale_keys.append(key)
+            for key in stale_keys:
+                sent_tracker.pop(key, None)
+        except Exception:
+            pass
+
         # Build conversation for Claude and capture latest inbound message text
         latest_inbound = ""
         if turns:
@@ -269,7 +285,9 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
             else:
                 script_id = decision_response[:20]  # fallback to first 20 chars (Script 8 AI-generated)
             
-            msg_key = f"{device_id}:{contact_id}:{script_id}"
+            latest_fingerprint_source = latest_norm or latest_msg.lower().strip() or "(none)"
+            latest_hash = hashlib.sha1(latest_fingerprint_source.encode("utf-8")).hexdigest()[:12]
+            msg_key = f"{device_id}:{contact_id}:{script_id}:{latest_hash}"
             
             # Check if we've already sent this message
             if msg_key in sent_tracker:
