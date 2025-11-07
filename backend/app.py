@@ -41,11 +41,11 @@ Script 2 "Yes I'll be using this number from now on"
   Examples: "is this james", "are you john", "is this your new number"
   NOT: Generic "who" questions
 
-Script 3 "I'll be using this number from now on because i've got a new plan with O2"
+Script 3 "Because I wanted a new number to be honest, a fresh start"
   TRIGGER: They ask WHY you got a new number or WHY you're using this number
-  Keywords: "why", "y", "reason", "what for", "why have you", "why did you", "why do you"
-  Examples: "why?", "why have you got a new number?", "why did you get a new number?", "what for?", "reason?"
-  CRITICAL: If the message contains "why" (especially "why have you got" or "why did you get" or "why do you have" + "new number"), this is Script 3, NOT Script 2
+  Keywords: "why", "y", "reason", "what for", "why have you", "why did you", "why do you", "why didn't you port"
+  Examples: "why?", "why have you got a new number?", "why did you get a new number?", "why didn't you port your old number?", "what for?", "reason?"
+  CRITICAL: If the message contains "why" (especially "why have you got" or "why did you get" or "why do you have" or "why didn't you port" + "new number"), this is Script 3, NOT Script 2
 
 Script 4 "Do not worry i will get it cancelled"
   TRIGGER: They mention contract/cancellation
