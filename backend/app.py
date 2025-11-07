@@ -267,6 +267,7 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
         decision_action = decision.get("action", "NO_SEND")
         decision_response = decision.get("response", "")
         
+        script_id = ""
         if decision_action == "SEND" and decision_response:
             # Create unique key for this message/script combination
             # Normalize the response to identify which script it is
@@ -308,6 +309,26 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 decision["reasoning"] = "Script keywords not present in latest inbound message"
                 script_id = ""
 
+        if decision_action == "SEND" and decision_response:
+            # Recompute script_id if necessary (e.g., guard may have cleared it)
+            if not script_id:
+                if "Your eldest and favourite" in decision_response:
+                    script_id = "script1"
+                elif "Yes I'll be using this number from now on" in decision_response and "because" in decision_response:
+                    script_id = "script3"
+                elif "Yes I'll be using this number from now on" in decision_response:
+                    script_id = "script2"
+                elif "Do not worry i will get it cancelled" in decision_response:
+                    script_id = "script4"
+                elif "sorry i meant EE" in decision_response:
+                    script_id = "script5"
+                elif "Yes ill be using this number from now" in decision_response:
+                    script_id = "script6"
+                elif "I got the Iphone 16" in decision_response:
+                    script_id = "script7"
+                else:
+                    script_id = decision_response[:20]
+
             latest_fingerprint_source = latest_norm or latest_msg.lower().strip() or "(none)"
             latest_hash = hashlib.sha1(latest_fingerprint_source.encode("utf-8")).hexdigest()[:12]
             msg_key = f"{device_id}:{contact_id}:{script_id}:{latest_hash}:{turn_count}"
@@ -333,7 +354,7 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 decision_action = "NO_SEND"
                 decision_response = ""
                 decision["reasoning"] = "Already sent this message to this contact (duplicate prevention)"
-        
+
         # Format response for Android app
         result = {
             "action": decision_action,
