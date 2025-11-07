@@ -16,8 +16,9 @@ import androidx.core.app.NotificationCompat
 import android.net.Uri
 
 // Sends SMS one-by-one with a 5 second gap between messages.
+// ALL messages must come from AI - no manual sending allowed.
 object AutoSendQueue {
-    enum class Source { MANUAL, AI }
+    enum class Source { AI } // Only AI source - manual removed
     interface Listener { fun onQueueProgress(pending: Int) }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -138,20 +139,64 @@ object AutoSendQueue {
     }
 
     @Synchronized
-    fun enqueue(context: Context, address: String, text: String, source: Source = Source.MANUAL, incomingMessageHash: String? = null) {
+    fun enqueue(context: Context, address: String, text: String, source: Source = Source.AI, incomingMessageHash: String? = null) {
         val appCtx = context.applicationContext
-        if (source == Source.MANUAL) {
-            val settings = appCtx.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            if (settings.getBoolean("ai_response_enabled", false)) {
-                android.util.Log.i("AutoSendQueue", "Manual automation blocked while AI response mode is enabled")
-                handler.post {
-                    android.widget.Toast.makeText(appCtx, "AI mode active — manual scripts disabled", android.widget.Toast.LENGTH_SHORT).show()
-                }
-                return
+        
+        // ALL messages must come from AI - verify AI is enabled
+        val settings = appCtx.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        if (!settings.getBoolean("ai_response_enabled", false)) {
+            android.util.Log.w("AutoSendQueue", "AI response not enabled - blocking message send")
+            handler.post {
+                android.widget.Toast.makeText(appCtx, "AI must be enabled to send messages", android.widget.Toast.LENGTH_SHORT).show()
             }
+            return
         }
-        ensureReceivers(appCtx)
+        
+        // Only accept AI source
+        if (source != Source.AI) {
+            android.util.Log.w("AutoSendQueue", "Only AI source allowed - blocking non-AI message")
+            return
+        }
+        
+        // Check for duplicate messages - check the actual SMS database to see if this exact text was already sent to this contact
         val t = text.ifBlank { "." } // avoid empty
+        
+        // Query the SMS database to check if this exact message was already sent to this contact
+        var alreadySent = false
+        try {
+            appCtx.contentResolver.query(
+                android.provider.Telephony.Sms.Sent.CONTENT_URI,
+                arrayOf(android.provider.Telephony.Sms.BODY, android.provider.Telephony.Sms.ADDRESS),
+                null,
+                null,
+                "${android.provider.Telephony.Sms.DATE} DESC"
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val sentBody = cursor.getString(0) ?: continue
+                    val sentAddress = cursor.getString(1) ?: continue
+                    
+                    // Check if this is the same contact and same message text
+                    if (android.telephony.PhoneNumberUtils.compare(appCtx, address, sentAddress) && 
+                        sentBody.trim() == t.trim()) {
+                        alreadySent = true
+                        android.util.Log.d("AutoSendQueue", "Found duplicate in chat history: '$t' already sent to $address")
+                        break
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AutoSendQueue", "Error checking for duplicates: ${e.message}", e)
+        }
+        
+        if (alreadySent) {
+            android.util.Log.w("AutoSendQueue", "Duplicate message detected in chat history - not sending again: $t")
+            handler.post {
+                android.widget.Toast.makeText(appCtx, "Message already sent", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        
+        ensureReceivers(appCtx)
         queue.add(Triple(address, t, incomingMessageHash))
         notifyProgress()
         if (!running) {
