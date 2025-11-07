@@ -70,9 +70,9 @@ Script 7 "I got the Iphone 16"
   NOT: "did you get" (that's Script 6)
 
 Script 8 AI-GENERATED (How Are You)
-  TRIGGER: They EXPLICITLY ask HOW YOU ARE (not just greetings, not responses/acknowledgments)
-  Keywords: "how are you", "how you doing", "you ok", "you alright", "how's everything", "how are things", "how have you been"
-  Examples that trigger: "how are you", "how you doing", "hope you are doing well", "how are things", "how have you been?"
+  TRIGGER: They EXPLICITLY ask HOW YOU ARE or express hope about your wellbeing (not just greetings, not responses/acknowledgments)
+  Keywords: "how are you", "how you doing", "you ok", "you alright", "how's everything", "how are things", "how have you been", "hope you are doing", "hope you're doing", "hope you doing well"
+  Examples that trigger: "how are you", "how you doing", "hope you are doing well", "hope you're doing well", "Hi Katie, hope you are doing well", "how are things", "how have you been?"
   Examples that DO NOT trigger: "Good thanks", "I'm fine", "Doing well", "Alright", "Okay" - these are responses/acknowledgments, NOT questions asking how you are
   CRITICAL: Only trigger if they are ASKING a question about how you are. Do NOT trigger on:
     - Responses to your "how are you" question (e.g., "Good thanks", "I'm fine", "Doing well")
@@ -143,7 +143,7 @@ DECISION PROCESS:
 7. Respond as instructed - be ready to handle ANY type of message appropriately
 
 CRITICAL: When a message contains multiple elements, identify the PRIMARY question or intent:
-- If it contains "how are you" AS A QUESTION → This is the PRIMARY intent → Script 8
+- If it contains "how are you" AS A QUESTION or "hope you are doing well" → This is the PRIMARY intent → Script 8
 - If it contains "why" (especially "why have you"/"why did you"/"why do you" + "new number") → This is the PRIMARY intent → Script 3
 - If it contains "is this [name]" or "are you [name]" → This is identity confirmation → Script 2 (NOT Script 1, even if it starts with "is this")
 - If it contains generic "who" WITHOUT a specific name → This is Script 1
@@ -159,7 +159,7 @@ PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - Else if contains "new phone"/"got phone"/"new device" → Script 6
 - Else if contains "why"/"y"/"reason"/"what for" (especially "why have you"/"why did you"/"why do you" + "new number") → Script 3 (takes priority over name confirmation)
 - Else if contains "is this [name]"/"are you [name]"/"is this your new number" → Script 2 (takes priority over generic "who" questions)
-- Else if contains EXPLICIT how-are-you QUESTION (how are you/how you doing/you ok/you alright/how's everything/how are things) - NOT responses like "good thanks"/"I'm fine" → Script 8 (takes priority over greetings)
+- Else if contains EXPLICIT how-are-you QUESTION (how are you/how you doing/you ok/you alright/how's everything/how are things/hope you are doing/hope you're doing/hope you doing well) - NOT responses like "good thanks"/"I'm fine" → Script 8 (takes priority over greetings)
 - Else if contains generic who (who/whos/who is/who r u/hu/whose) WITHOUT a specific name → Script 1
 - Else if contains simple greeting (hi/hello/hey/hi there/hello there/hi dad/hi mum/hello dad/hello mum) at start → Script 9
 - Else if message is ANY normal conversational message (request like "Can you get me..." or "Can you pick up the kids", question, statement, serious news like "I have cancer", acknowledgment, etc.) that doesn't match above → Script 10 (AI-generated natural response)
@@ -179,7 +179,7 @@ INTERNAL PROCESS (do not include in output):
   5. Contains "is this" followed by a WORD (not "who") → NAME_ID (check BEFORE generic "who")
   6. Contains "are you" followed by a WORD → NAME_ID (check BEFORE generic "who")
   7. Contains "is this your new number" → NAME_ID
-  8. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things" question (NOT responses like "good thanks"/"I'm fine"/"doing well") → HOW_YOU (check entire message, not just start)
+  8. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things"/"hope you are doing"/"hope you're doing"/"hope you doing well" question (NOT responses like "good thanks"/"I'm fine"/"doing well") → HOW_YOU (check entire message, not just start)
   9. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" and WITHOUT a specific name → WHO
   10. Contains "already with O2"/"thought you were O2" → ALREADY_O2
   11. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there"/"hi dad"/"hi mum"/"hello dad"/"hello mum") at start of message AND no questions → GREETING
@@ -200,6 +200,7 @@ EXAMPLES (for clarity, not to output):
 - Latest: "Hi dad" → Class: GREETING (simple greeting with relationship term) → SEND Script 9 (AI-generated greeting)
 - Latest: "Hello" → Class: GREETING (simple greeting) → SEND Script 9 (AI-generated greeting)
 - Latest: "how are you" → Class: HOW_YOU (explicit question) → SEND Script 8 (AI-generated response)
+- Latest: "Hi Katie, hope you are doing well" → Class: HOW_YOU (contains "hope you are doing well") → SEND Script 8 (AI-generated response)
 - Latest: "Good thanks" → Class: GENERAL_CONVERSATION (response/acknowledgment, NOT a question) → SEND Script 10 (AI-generated natural response) or NO_SEND
 - Latest: "I'm fine" → Class: GENERAL_CONVERSATION (response, NOT a question) → SEND Script 10 or NO_SEND
 - Latest: "Can you get me a milk from the shop?" → Class: GENERAL_CONVERSATION (normal request) → SEND Script 10 (AI-generated natural response like "Sure" or "Will do")
@@ -407,13 +408,13 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 # For AI-generated responses (Script 8 or 9), check if response matches expected pattern
                 if len(script_key) > 10:  # AI-generated response (first 20 chars)
                     # Check if it's likely Script 8 (how are you response) - response will be longer, conversational
-                    if len(response_text) > 30 and re.search(r"\b(how are you|how you doing|you ok|you alright|how's everything|how are things|how have you been)\b", latest, re.IGNORECASE):
+                    if len(response_text) > 30 and re.search(r"\b(how are you|how you doing|you ok|you alright|how's everything|how are things|how have you been|hope you are doing|hope you're doing|hope you doing well)\b", latest, re.IGNORECASE):
                         return False  # Script 8 matches
                     # Check if it's likely Script 9 (greeting response) - response will be short greeting
                     if len(response_text) <= 30 and re.search(r"^(hi|hello|hey|hi there|hello there|hi dad|hi mum|hello dad|hello mum)\b", latest, re.IGNORECASE):
                         return False  # Script 9 matches
                     # If AI-generated but doesn't match Script 8 or 9 patterns, check if latest has the right keywords
-                    if re.search(r"\b(how are you|how you doing|you ok|you alright|how's everything|how are things|how have you been)\b", latest, re.IGNORECASE):
+                    if re.search(r"\b(how are you|how you doing|you ok|you alright|how's everything|how are things|how have you been|hope you are doing|hope you're doing|hope you doing well)\b", latest, re.IGNORECASE):
                         return False  # Script 8 keywords present
                     if re.search(r"^(hi|hello|hey|hi there|hello there|hi dad|hi mum|hello dad|hello mum)\b", latest, re.IGNORECASE):
                         return False  # Script 9 keywords present
