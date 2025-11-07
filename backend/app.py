@@ -378,26 +378,20 @@ def get_response():
                     latest_inbound = text
                     break
             
-            # Check if we're waiting for a reply: look at all turns except the current one
-            # If the most recent message (excluding current) was from "you", we're waiting
-            if len(parsed_turns) > 1:
-                # Check turns in reverse order, skipping the current "them" message
-                found_current = False
-                for turn in reversed(parsed_turns):
-                    role = (turn.get('role') or '').lower()
-                    text = turn.get('text') or ''
-                    
-                    if role == 'them' and text.strip() and not found_current:
-                        # This is the current message, skip it
-                        found_current = True
-                        continue
-                    elif found_current:
-                        # We found a message before the current one
-                        if role == 'you' and text.strip():
-                            # The most recent message before the current one was from us
-                            # We're waiting for their reply, don't send another message
-                            waiting_for_reply = True
-                        break
+            # Check if we're waiting for a reply
+            # If we have a new message from them (latest_inbound exists and is valid), we should respond
+            # We're only "waiting" if there's no new message from them AND the last message was from us
+            if latest_inbound and latest_inbound != "(no inbound message)":
+                # We have a new message from them, so we should respond (not waiting)
+                waiting_for_reply = False
+            elif parsed_turns:
+                # No new message from them, check if last message was from us
+                last_turn = parsed_turns[-1]
+                last_role = (last_turn.get('role') or '').lower()
+                if last_role == 'you':
+                    # Last message was from us, and there's no new message from them
+                    # We're waiting for their reply - don't send another message
+                    waiting_for_reply = True
 
             conversation_text = "\n".join(conversation_lines) if conversation_lines else "(No previous conversation history)"
         else:
