@@ -36,10 +36,10 @@ Script 1 "Your eldest and favourite"
   NOT: "Is this Katie?" (that's Script 2 - has a specific name)
   NOT: "Are you James?" (that's Script 2 - has a specific name)
 
-Script 2 "Yes I'll be using this number from now on" OR AI-GENERATED for "or" questions OR "Yes please delete my old number as ill be using this number from now on"
-  TRIGGER: They confirm identity with a NAME, ask about new number, or ask if they should delete your old number
-  Keywords: "is this [NAME]", "are you [NAME]", "is this your new number", "is this [NAME] or [NAME]", "[NAME] or [NAME]", "should I delete your old number", "delete your old number", "delete old number"
-  Examples: "is this james", "are you john", "is this your new number", "is this jermaine or katie?", "jermaine or katie?", "should I delete your old number?", "Okay so should I delete your old number?"
+Script 2 "Yes I'll be using this number from now on" OR AI-GENERATED for "or" questions OR "Yes please delete my old number as ill be using this number from now on" OR "Its permanent ill be using this number from now on" OR "Its my personal number"
+  TRIGGER: They confirm identity with a NAME, ask about new number, ask if it's permanent/temporary, ask if it's work/personal, or ask if they should delete your old number
+  Keywords: "is this [NAME]", "are you [NAME]", "is this your new number", "is this [NAME] or [NAME]", "[NAME] or [NAME]", "should I delete your old number", "delete your old number", "delete old number", "permanent number", "temporary number", "permanent", "temporary", "work number", "personal number", "work", "personal", "new permanent number", "new temporary number"
+  Examples: "is this james", "are you john", "is this your new number", "is this jermaine or katie?", "jermaine or katie?", "should I delete your old number?", "Okay so should I delete your old number?", "this your new permanent number?", "is this permanent or temporary?", "is this a work number or personal?", "is this your work number?"
   SPECIAL CASE 1: If they ask "is this [NAME1] or [NAME2]?" or "[NAME1] or [NAME2]?", respond with "it's [name]"
     - Common feminine names: Katie, Kate, Sarah, Emma, Emily, Jessica, etc.
     - Common masculine names: Jermaine, James, John, Michael, David, etc.
@@ -47,6 +47,9 @@ Script 2 "Yes I'll be using this number from now on" OR AI-GENERATED for "or" qu
     - If no feminine name is present, use the masculine name
     - Response format: "it's [name]" (e.g., "it's Katie" for feminine, "it's James" for masculine)
   SPECIAL CASE 2: If they ask "should I delete your old number?" or similar questions about deleting the old number, respond with "Yes please delete my old number as ill be using this number from now on"
+  SPECIAL CASE 3: If they ask about "permanent" or "temporary" (e.g., "is this permanent?", "is this your permanent number?", "is this temporary?"), respond with "Its permanent ill be using this number from now on"
+  SPECIAL CASE 4: If they ask about "work" or "personal" (e.g., "is this a work number?", "is this your work number?", "is this personal?", "is this your personal number?"), respond with "Its my personal number"
+  SPECIAL CASE 5: If they ask about the new number in general (e.g., "is this your new number?", "this your new number?"), respond with "Yes ill be using this number from now on"
   NOT: Generic "who" questions
 
 Script 3 "I've got a new plan with O2 and decided to keep the new number"
@@ -200,7 +203,7 @@ PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - Else if contains "what phone"/"which phone"/"what device"/"what iphone"/"which model"/"what model"/"which iphone" → Script 7
 - Else if contains "new phone"/"got phone"/"new device" → Script 6
 - Else if contains "why"/"y"/"reason"/"what for" (especially "why have you"/"why did you"/"why do you" + "new number") → Script 3 (takes priority over name confirmation)
-- Else if contains "is this [name]"/"are you [name]"/"is this your new number"/"should I delete your old number"/"delete your old number"/"delete old number" → Script 2 (takes priority over generic "who" questions)
+- Else if contains "is this [name]"/"are you [name]"/"is this your new number"/"should I delete your old number"/"delete your old number"/"delete old number"/"permanent number"/"temporary number"/"permanent"/"temporary"/"work number"/"personal number"/"work"/"personal"/"new permanent number"/"new temporary number" → Script 2 (takes priority over generic "who" questions)
 - Else if contains EXPLICIT how-are-you QUESTION (how are you/how you doing/you ok/you alright/how's everything/how are things/hope you are doing/hope you're doing/hope you doing well) - NOT responses like "good thanks"/"I'm fine" → Script 8 (takes priority over greetings)
 - Else if contains agreement/acknowledgment keywords (ok/okay/ok thanks/okay thanks/number saved/saved/fine/sure/alright/will do/got it/done/sorted) OR thumbs up emoji (👍) → Script 9 (HIGH PRIORITY - overrides other scripts)
 - Else if contains generic who (who/whos/who is/who r u/hu/whose) WITHOUT a specific name → Script 1
@@ -240,13 +243,15 @@ INTERNAL PROCESS (do not include in output):
   7. Contains "are you" followed by a WORD → NAME_ID (check BEFORE generic "who")
   8. Contains "is this your new number" → NAME_ID
   9. Contains "should I delete your old number" or "delete your old number" or "delete old number" → NAME_ID
-  10. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things"/"hope you are doing"/"hope you're doing"/"hope you doing well" question (NOT responses like "good thanks"/"I'm fine"/"doing well") → HOW_YOU (check entire message, not just start)
-  11. Contains agreement/acknowledgment keywords (ok/okay/ok thanks/okay thanks/number saved/saved/fine/sure/alright/will do/got it/done/sorted) OR thumbs up emoji (👍) → AGREEMENT (check BEFORE generic who and greetings)
-  12. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" and WITHOUT a specific name → WHO
-  13. Contains "already with O2"/"thought you were O2" → ALREADY_O2
-  14. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there"/"hi dad"/"hi mum"/"hello dad"/"hello mum") at start of message AND no questions → GREETING
-  15. If message is ANY normal conversational message (request, question, statement, serious news, acknowledgment, etc.) that doesn't match any above → GENERAL_CONVERSATION
-  16. Otherwise (only for truly empty/unparseable messages) → NONE
+  10. Contains "permanent number" or "temporary number" or "permanent" or "temporary" or "new permanent number" or "new temporary number" or patterns like "this your new permanent number" or "this your permanent number" → NAME_ID
+  11. Contains "work number" or "personal number" or "work" (in context of number) or "personal" (in context of number) → NAME_ID
+  12. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things"/"hope you are doing"/"hope you're doing"/"hope you doing well" question (NOT responses like "good thanks"/"I'm fine"/"doing well") → HOW_YOU (check entire message, not just start)
+  13. Contains agreement/acknowledgment keywords (ok/okay/ok thanks/okay thanks/number saved/saved/fine/sure/alright/will do/got it/done/sorted) OR thumbs up emoji (👍) → AGREEMENT (check BEFORE generic who and greetings)
+  14. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" and WITHOUT a specific name → WHO
+  15. Contains "already with O2"/"thought you were O2" → ALREADY_O2
+  16. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there"/"hi dad"/"hi mum"/"hello dad"/"hello mum") at start of message AND no questions → GREETING
+  17. If message is ANY normal conversational message (request, question, statement, serious news, acknowledgment, etc.) that doesn't match any above → GENERAL_CONVERSATION
+  18. Otherwise (only for truly empty/unparseable messages) → NONE
 - Then map: INAPPROPRIATE → NO_SEND (ignore and delete), TIME_WASTING → NO_SEND, WHO → Script 1, NAME_ID → Script 2, WHY → Script 3, CONTRACT → Script 4, ALREADY_O2 → Script 5, NEW_PHONE → Script 6, WHAT_PHONE → Script 7, HOW_YOU → Script 8, AGREEMENT → Script 9, GREETING → Script 10, GENERAL_CONVERSATION → Script 11, NONE → NO_SEND
 
 EXAMPLES (for clarity, not to output):
@@ -256,6 +261,12 @@ EXAMPLES (for clarity, not to output):
 - Latest: "is this jermaine or katie?" → Class: NAME_ID ("is this" + "or" question) → SEND Script 2 (response: "it's Katie" - feminine preferred)
 - Latest: "is this james or john?" → Class: NAME_ID ("is this" + "or" question) → SEND Script 2 (response: "it's James" - masculine when no feminine)
 - Latest: "Okay so should I delete your old number?" → Class: NAME_ID (contains "should I delete your old number") → SEND Script 2 (response: "Yes please delete my old number as ill be using this number from now on")
+- Latest: "this your new permanent number?" → Class: NAME_ID (contains "permanent number") → SEND Script 2 (response: "Its permanent ill be using this number from now on")
+- Latest: "Jermaine,this your new permanent number?" → Class: NAME_ID (contains "permanent number") → SEND Script 2 (response: "Its permanent ill be using this number from now on")
+- Latest: "is this permanent or temporary?" → Class: NAME_ID (contains "permanent" or "temporary") → SEND Script 2 (response: "Its permanent ill be using this number from now on")
+- Latest: "is this a work number or personal?" → Class: NAME_ID (contains "work" or "personal") → SEND Script 2 (response: "Its my personal number")
+- Latest: "is this your work number?" → Class: NAME_ID (contains "work number") → SEND Script 2 (response: "Its my personal number")
+- Latest: "this your new number?" → Class: NAME_ID (contains "new number") → SEND Script 2 (response: "Yes ill be using this number from now on")
 - Latest: "okay thanks fine number saved" → Class: AGREEMENT (contains agreement keywords) → SEND Script 9 (response: "Could you do me a favour please?")
 - Latest: "ok" → Class: AGREEMENT (contains "ok") → SEND Script 9 (response: "Could you do me a favour please?")
 - Latest: "👍" → Class: AGREEMENT (contains thumbs up emoji) → SEND Script 9 (response: "Could you do me a favour please?")
@@ -308,6 +319,9 @@ OUTPUT POLICY:
     * If no feminine name is present, use the masculine name
     * Examples: "is this jermaine or katie?" → "it's Katie" (feminine preferred), "is this james or john?" → "it's James" (masculine when no feminine)
   - If they ask "should I delete your old number?" or similar questions about deleting the old number, respond with "Yes please delete my old number as ill be using this number from now on"
+  - If they ask about "permanent" or "temporary" (e.g., "is this permanent?", "is this your permanent number?", "is this temporary?", "this your new permanent number?"), respond with "Its permanent ill be using this number from now on"
+  - If they ask about "work" or "personal" (e.g., "is this a work number?", "is this your work number?", "is this personal?", "is this your personal number?"), respond with "Its my personal number"
+  - If they ask about the new number in general (e.g., "is this your new number?", "this your new number?"), respond with "Yes ill be using this number from now on"
   - Otherwise, the response MUST be EXACTLY "Yes I'll be using this number from now on"
   - If their message contains kisses, append the same number of kisses at the end
   - NO extra words, NO greetings, NO emojis, NO signatures (except kisses if they sent them)
@@ -509,9 +523,15 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
             # Normalize the response to identify which script it is
             if "Your eldest and favourite" in decision_response:
                 script_id = "script1"
+            elif "Its permanent ill be using this number from now on" in decision_response:
+                script_id = "script2"
+            elif "Its my personal number" in decision_response:
+                script_id = "script2"
             elif "Yes I'll be using this number from now on" in decision_response and "because" in decision_response:
                 script_id = "script3"
             elif "Yes I'll be using this number from now on" in decision_response:
+                script_id = "script2"
+            elif "Yes ill be using this number from now on" in decision_response:
                 script_id = "script2"
             elif "Do not worry i will get it cancelled" in decision_response:
                 script_id = "script4"
@@ -530,11 +550,22 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 if script_key == "script4":
                     return not re.search(r"\b(contract|cancel|old plan|payment plan)\b", latest, re.IGNORECASE)
                 if script_key == "script2":
-                    # Match "is this [name]" or "are you [name]" or "is this your new number" or "delete old number"
+                    # Match "is this [name]" or "are you [name]" or "is this your new number" or "delete old number" or "permanent/temporary/work/personal"
                     # Handle names with any case and optional punctuation at the end
                     # Use [a-zA-Z]+ to match names regardless of case (character classes don't respect IGNORECASE)
-                    pattern = r"\b(is this [a-zA-Z]+|are you [a-zA-Z]+|is this your new number|should I delete your old number|delete your old number|delete old number)[\s\?\!\.]*"
-                    return not re.search(pattern, latest, re.IGNORECASE)
+                    pattern = r"\b(is this [a-zA-Z]+|are you [a-zA-Z]+|is this your new number|should I delete your old number|delete your old number|delete old number|permanent number|temporary number|new permanent number|new temporary number|work number|personal number)\b"
+                    # Also check for "this your new permanent number" or similar patterns (without "is")
+                    pattern2 = r"(this|that)\s+(your|the)\s+(new\s+)?(permanent|temporary|work|personal)\s+number"
+                    # Also check for standalone "permanent", "temporary", "work", "personal" in context of number
+                    if re.search(pattern, latest, re.IGNORECASE) or re.search(pattern2, latest, re.IGNORECASE):
+                        return False
+                    # Check for "permanent" or "temporary" in context of number (even if "new" is between them)
+                    if re.search(r"(permanent|temporary)", latest, re.IGNORECASE) and re.search(r"(number|num)", latest, re.IGNORECASE):
+                        return False
+                    # Check for "work" or "personal" in context of number
+                    if re.search(r"\b(work|personal)\b", latest, re.IGNORECASE) and re.search(r"\b(number|num)\b", latest, re.IGNORECASE):
+                        return False
+                    return True
                 if script_key == "script1":
                     return not re.search(r"\bwho(['\s]|$)|\bwhos\b|\bwho is\b", latest, re.IGNORECASE)
                 if script_key == "script3":
@@ -578,9 +609,15 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
             if not script_id:
                 if "Your eldest and favourite" in decision_response:
                     script_id = "script1"
+                elif "Its permanent ill be using this number from now on" in decision_response:
+                    script_id = "script2"
+                elif "Its my personal number" in decision_response:
+                    script_id = "script2"
                 elif "Yes I'll be using this number from now on" in decision_response and "because" in decision_response:
                     script_id = "script3"
                 elif "Yes I'll be using this number from now on" in decision_response:
+                    script_id = "script2"
+                elif "Yes ill be using this number from now on" in decision_response:
                     script_id = "script2"
                 elif "Do not worry i will get it cancelled" in decision_response:
                     script_id = "script4"
