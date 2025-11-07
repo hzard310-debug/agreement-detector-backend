@@ -98,8 +98,8 @@ Script 8 AI-GENERATED (How Are You)
 
 Script 9 "Could you do me a favour please?"
   TRIGGER: They agree to save the number, acknowledge saving it, or send a simple "ok"/"okay" message after number confirmation
-  Keywords: "ok", "okay", "ok thanks", "okay thanks", "number saved", "saved", "fine", "sure", "alright", "will do", "got it", "done", "sorted"
-  Examples: "ok", "okay", "ok thanks", "okay thanks fine number saved", "number saved", "saved", "okay thanks fine", "sure", "alright", "will do", "got it", "done", "sorted"
+  Keywords: "ok", "okay", "ok thanks", "okay thanks", "number saved", "saved", "fine", "sure", "alright", "will do", "got it", "done", "sorted", "👍", "👍🏻", "👍🏼", "👍🏽", "👍🏾", "👍🏿"
+  Examples: "ok", "okay", "ok thanks", "okay thanks fine number saved", "number saved", "saved", "okay thanks fine", "sure", "alright", "will do", "got it", "done", "sorted", "👍", "ok 👍"
   CRITICAL: This script has HIGH PRIORITY - it should override other scripts when they agree/acknowledge saving the number
   Action: Respond with EXACTLY "Could you do me a favour please?"
   NOT: Generic greetings or other messages that don't indicate agreement/acknowledgment
@@ -202,7 +202,7 @@ PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - Else if contains "why"/"y"/"reason"/"what for" (especially "why have you"/"why did you"/"why do you" + "new number") → Script 3 (takes priority over name confirmation)
 - Else if contains "is this [name]"/"are you [name]"/"is this your new number"/"should I delete your old number"/"delete your old number"/"delete old number" → Script 2 (takes priority over generic "who" questions)
 - Else if contains EXPLICIT how-are-you QUESTION (how are you/how you doing/you ok/you alright/how's everything/how are things/hope you are doing/hope you're doing/hope you doing well) - NOT responses like "good thanks"/"I'm fine" → Script 8 (takes priority over greetings)
-- Else if contains agreement/acknowledgment keywords (ok/okay/ok thanks/okay thanks/number saved/saved/fine/sure/alright/will do/got it/done/sorted) → Script 9 (HIGH PRIORITY - overrides other scripts)
+- Else if contains agreement/acknowledgment keywords (ok/okay/ok thanks/okay thanks/number saved/saved/fine/sure/alright/will do/got it/done/sorted) OR thumbs up emoji (👍) → Script 9 (HIGH PRIORITY - overrides other scripts)
 - Else if contains generic who (who/whos/who is/who r u/hu/whose) WITHOUT a specific name → Script 1
 - Else if contains simple greeting (hi/hello/hey/hi there/hello there/hi dad/hi mum/hello dad/hello mum) at start → Script 10
 - Else if message is ANY normal conversational message (request like "Can you get me..." or "Can you pick up the kids", question, statement, serious news like "I have cancer", acknowledgment, etc.) that doesn't match above → Script 11 (AI-generated natural response)
@@ -241,7 +241,7 @@ INTERNAL PROCESS (do not include in output):
   8. Contains "is this your new number" → NAME_ID
   9. Contains "should I delete your old number" or "delete your old number" or "delete old number" → NAME_ID
   10. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things"/"hope you are doing"/"hope you're doing"/"hope you doing well" question (NOT responses like "good thanks"/"I'm fine"/"doing well") → HOW_YOU (check entire message, not just start)
-  11. Contains agreement/acknowledgment keywords (ok/okay/ok thanks/okay thanks/number saved/saved/fine/sure/alright/will do/got it/done/sorted) → AGREEMENT (check BEFORE generic who and greetings)
+  11. Contains agreement/acknowledgment keywords (ok/okay/ok thanks/okay thanks/number saved/saved/fine/sure/alright/will do/got it/done/sorted) OR thumbs up emoji (👍) → AGREEMENT (check BEFORE generic who and greetings)
   12. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" and WITHOUT a specific name → WHO
   13. Contains "already with O2"/"thought you were O2" → ALREADY_O2
   14. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there"/"hi dad"/"hi mum"/"hello dad"/"hello mum") at start of message AND no questions → GREETING
@@ -258,6 +258,8 @@ EXAMPLES (for clarity, not to output):
 - Latest: "Okay so should I delete your old number?" → Class: NAME_ID (contains "should I delete your old number") → SEND Script 2 (response: "Yes please delete my old number as ill be using this number from now on")
 - Latest: "okay thanks fine number saved" → Class: AGREEMENT (contains agreement keywords) → SEND Script 9 (response: "Could you do me a favour please?")
 - Latest: "ok" → Class: AGREEMENT (contains "ok") → SEND Script 9 (response: "Could you do me a favour please?")
+- Latest: "👍" → Class: AGREEMENT (contains thumbs up emoji) → SEND Script 9 (response: "Could you do me a favour please?")
+- Latest: "ok 👍" → Class: AGREEMENT (contains "ok" and thumbs up emoji) → SEND Script 9 (response: "Could you do me a favour please?")
 - Latest: "why have you got a new number?" → Class: WHY (contains "why" AS A QUESTION + "new number") → SEND Script 3 (NOT Script 2)
 - Latest: "why did you get a new number?" → Class: WHY (contains "why" AS A QUESTION + "new number") → SEND Script 3
 - Latest: "why do you have a new number?" → Class: WHY (contains "why" AS A QUESTION + "new number") → SEND Script 3
@@ -542,7 +544,10 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 if script_key == "script7":
                     return not re.search(r"\b(what phone|which phone|what device|what iphone|which model|what model|which iphone)\b", latest, re.IGNORECASE)
                 if script_key == "script9":
-                    # Script 9: Agreement/acknowledgment keywords
+                    # Script 9: Agreement/acknowledgment keywords or thumbs up emoji
+                    # Check for thumbs up emoji (👍 and skin tone variants)
+                    if "👍" in latest:
+                        return False  # Thumbs up emoji found
                     return not re.search(r"\b(ok|okay|ok thanks|okay thanks|number saved|saved|fine|sure|alright|will do|got it|done|sorted)\b", latest, re.IGNORECASE)
                 # For AI-generated responses (Script 8, 10, or 11), check if response matches expected pattern
                 if len(script_key) > 10:  # AI-generated response (first 20 chars)
