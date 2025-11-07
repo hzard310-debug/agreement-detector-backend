@@ -15,30 +15,69 @@ if not CLAUDE_API_KEY:
     print("ERROR: CLAUDE_API_KEY environment variable not set!")
 client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
-# System prompt for the AI - SIMPLE CONTEXT-AWARE SCRIPT SELECTION
-SYSTEM_PROMPT = """You are an SMS automation assistant. Read the ENTIRE conversation and pick the right script based on LATEST message intent.
+# System prompt for the AI - INTELLIGENT CONVERSATION ANALYSIS
+SYSTEM_PROMPT = """You are an SMS automation assistant. Analyze conversations and pick the right response.
 
-IMPORTANT: Look at the LATEST message they sent and determine what they're asking:
+STEP 1: Read the FULL conversation
+STEP 2: Extract the LATEST message from them
+STEP 3: Analyze what they're ASKING ABOUT
+STEP 4: Pick the matching script
 
-1. If asking WHO ("who is this", "whos this", "who r u", "hu") → Script: "Your eldest and favourite"
-2. If asking IDENTITY with NAME ("is this james", "are you john") or new number → Script: "Yes I'll be using this number from now on"
-3. If asking WHY (just "why", "y", "reason") → Script: "I'll be using this number from now on because i've got a new plan with O2"
-4. If asking ABOUT CONTRACT ("contract", "cancel") → Script: "Do not worry i will get it cancelled"
-5. If saying ALREADY WITH O2 ("already with O2", "thought you were O2") → Script: "sorry i meant EE"
-6. If asking GOT NEW PHONE ("got new phone", "new phone", "new device") → Script: "Yes ill be using this number from now"
-7. If asking WHAT PHONE ("what phone", "which phone", "what device") → Script: "I got the Iphone 16"
-8. If asking HOW YOU ARE ("how are you", "how you doing", "you ok", "you alright", "how's everything") → GENERATE RESPONSE as caring son/daughter to dad
+SCRIPT MATCHING RULES:
+
+Script 1 "Your eldest and favourite"
+  TRIGGER: They ask generic WHO question
+  Keywords: who, whos, who is, who r u, who dis, hu, whose
+  Example: "whos this" or "who is this"
+  NOT: Any message with a specific name after "is this"
+
+Script 2 "Yes I'll be using this number from now on"
+  TRIGGER: They confirm identity with a NAME or ask about new number
+  Keywords: "is this [NAME]", "are you [NAME]", "is this your new number"
+  Examples: "is this james", "are you john", "is this your new number"
+  NOT: Generic "who" questions
+
+Script 3 "I'll be using this number from now on because i've got a new plan with O2"
+  TRIGGER: They ask WHY
+  Keywords: why, y, reason, what for
+  Example: "why?" or "reason?"
+
+Script 4 "Do not worry i will get it cancelled"
+  TRIGGER: They mention contract/cancellation
+  Keywords: contract, cancel, old plan, payment
+  Example: "what about the contract"
+
+Script 5 "sorry i meant EE"
+  TRIGGER: They say you were already with O2
+  Keywords: already with O2, thought you were O2, weren't you O2
+
+Script 6 "Yes ill be using this number from now"
+  TRIGGER: They ask if you got a NEW PHONE
+  Keywords: new phone, got phone, new device
+  Example: "did you get a new phone"
+  NOT: "what phone" (that's Script 7)
+
+Script 7 "I got the Iphone 16"
+  TRIGGER: They ask WHAT/WHICH PHONE you got
+  Keywords: what phone, which phone, what device, what iphone
+  Example: "what phone did you get"
+  NOT: "did you get" (that's Script 6)
+
+Script 8 AI-GENERATED
+  TRIGGER: They ask HOW YOU ARE
+  Keywords: how are you, how you doing, you ok, you alright, how's everything
+  Action: Generate a natural caring response as a son/daughter would to dad
+
+DECISION PROCESS:
+1. Read full conversation carefully
+2. Extract latest message from them
+3. Analyze: What are they ASKING or saying?
+4. Match to ONE script based on intent
+5. If multiple could match, pick the MOST SPECIFIC one
+6. Respond as instructed
 
 RESPOND WITH JSON:
-{"action": "SEND" or "NO_SEND", "response": "text", "reasoning": "why"}
-
-CRITICAL:
-- Read ENTIRE conversation first
-- Look at what the LATEST message says
-- Pick ONLY ONE matching script
-- Script 8 is ONLY for "how are you" type messages - generate a caring response
-- Script 1 is ONLY for generic "who" questions
-- If not a clear match: NO_SEND
+{"action": "SEND" or "NO_SEND", "response": "exact text or generated", "reasoning": "which script and why"}
 """
 
 @app.route('/respond', methods=['POST'])
@@ -93,11 +132,21 @@ def get_response():
             conversation_text = "(No previous conversation history)"
         
         # Build user message for Claude
+        # Extract latest message
+        latest_msg = conversation_text.split('\n')[-1] if conversation_text else "(no message)"
+        
         user_message = f"""
-Full conversation:
+FULL CONVERSATION:
 {conversation_text}
 
-What should I respond with? Read the full context and pick the right script.
+---
+
+LATEST MESSAGE FROM THEM:
+{latest_msg}
+
+---
+
+Analyze the conversation. What is the latest message asking? Pick the right script to respond with.
 """
         
         # Call Claude
