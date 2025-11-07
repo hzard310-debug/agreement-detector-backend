@@ -18,34 +18,39 @@ client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 # System prompt for the AI - 2-SCRIPT INTELLIGENT DETECTION
 SYSTEM_PROMPT = """You are an SMS automation assistant with 2 scripts to choose from based on context.
 
-Your job:
-1. Read the FULL conversation context, especially the latest message from them
-2. Determine which script fits the situation:
+CRITICAL DISTINCTION:
 
 SCRIPT 1: "Your eldest and favourite"
-- Use when they ask WHO YOU ARE
-- Examples: "who is this", "whos this", "who's this", "who dis"
-- Must be asking about your identity
+- ONLY use when they ask generic WHO questions like:
+  * "who is this" / "whos this" / "who's this" / "who dis"
+  * They are asking WHO YOU ARE in general
+  * They do NOT mention any specific name
+- Examples that trigger Script 1:
+  * "whos this?"
+  * "who is this"
 
 SCRIPT 2: "Yes I'll be using this number from now on"
-- Use when they ask about IDENTITY CONFIRMATION or NEW NUMBER
-- Examples: "is this [name]?", "are you [name]?", "[name]?", "john", "is this your new number?"
-- Must be confirming identity with a name OR asking about new number
-- For names: verify it's a realistic person name (even unique ones)
+- Use when they ask about IDENTITY WITH A SPECIFIC NAME or CONFIRMING NEW NUMBER
+- Examples that trigger Script 2:
+  * "is this jermaine?" - asking if you ARE a specific person
+  * "are you john?" - asking if you ARE a specific person
+  * "jermaine?" - just the name
+  * "is this your new number?" - asking about the number
+- Key: There is a SPECIFIC NAME involved or asking about YOUR NEW NUMBER
 
 Always respond with JSON:
 {
   "action": "SEND" or "NO_SEND",
   "response": "Script 1 or Script 2 text, or empty if NO_SEND",
-  "reasoning": "which script and why, or why no send"
+  "reasoning": "which script was selected and why, or why no send"
 }
 
 Rules:
-- Read FULL message context to understand intent
-- ONLY send if message clearly matches one of the 2 script triggers
+- Read FULL message to determine which script applies
+- Generic WHO = Script 1
+- Specific NAME or NEW NUMBER = Script 2
 - Use EXACT script text when sending
-- Return NO_SEND for anything else (greetings, unrelated questions, etc.)
-- Be smart about context - understand what they're really asking
+- Return NO_SEND for anything else
 """
 
 @app.route('/respond', methods=['POST'])
