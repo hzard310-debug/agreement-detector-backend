@@ -3,6 +3,7 @@ import anthropic
 import os
 from datetime import datetime
 import json
+import re
 
 app = Flask(__name__)
 
@@ -98,6 +99,25 @@ PRIORITY RULES (explicit keyword wins):
 RESPOND WITH JSON:
 {"action": "SEND" or "NO_SEND", "response": "exact text or generated", "reasoning": "which script and why"}
 
+INTERNAL PROCESS (do not include in output):
+- Classify the latest message into ONE of: WHO | NAME_ID | WHY | CONTRACT | ALREADY_O2 | NEW_PHONE | WHAT_PHONE | HOW_YOU | NONE
+- Then map strictly:
+  WHO → Script 1
+  NAME_ID → Script 2
+  WHY → Script 3
+  CONTRACT → Script 4
+  ALREADY_O2 → Script 5
+  NEW_PHONE → Script 6
+  WHAT_PHONE → Script 7
+  HOW_YOU → Script 8
+  NONE → NO_SEND
+- Precedence if overlapping cues appear: CONTRACT > WHAT_PHONE > NEW_PHONE > NAME_ID > WHO > WHY > HOW_YOU
+
+EXAMPLES (for clarity, not to output):
+- Latest: "whos this??" → Class: WHO → SEND Script 1
+- Latest: "is this James" → Class: NAME_ID → SEND Script 2
+- Latest: "what about the contract i pay for" → Class: CONTRACT → SEND Script 4
+
 OUTPUT POLICY:
 - Scripts 1–7: The response MUST be EXACTLY the script text shown above, with the same wording, capitalization and punctuation. NO extra words, NO greetings, NO emojis, NO signatures.
 - Script 8: Respond only with the message content (no preambles). Mirror length (sentence vs short paragraph), keep warm and low‑key, no emojis, no exclamation spam, and DO NOT mention the new number unless they asked.
@@ -158,6 +178,7 @@ def get_response():
         # Build user message for Claude
         # Extract latest message
         latest_msg = conversation_text.split('\n')[-1] if conversation_text else "(no message)"
+        latest_norm = re.sub(r'[^a-z0-9 ]+', '', latest_msg.lower()) if latest_msg else ""
         
         user_message = f"""
 FULL CONVERSATION:
@@ -168,6 +189,9 @@ FULL CONVERSATION:
 LATEST MESSAGE FROM THEM:
 {latest_msg}
 
+LATEST (normalized, lowercase, punctuation removed):
+{latest_norm}
+
 ---
 
 Analyze the conversation. What is the latest message asking? Pick the right script to respond with.
@@ -176,7 +200,7 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
         # Call Claude
         message = client.messages.create(
             model="claude-3-haiku-20240307",
-            max_tokens=200,
+            max_tokens=350,
             system=SYSTEM_PROMPT,
             messages=[
                 {"role": "user", "content": user_message}
