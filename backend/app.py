@@ -287,6 +287,27 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
             else:
                 script_id = decision_response[:20]  # fallback to first 20 chars (Script 8 AI-generated)
 
+            def violates_priority(script_key: str, latest: str) -> bool:
+                if script_key == "script4":
+                    return not re.search(r"\b(contract|cancel|old plan|payment plan)\b", latest, re.IGNORECASE)
+                if script_key == "script2":
+                    return not re.search(r"\b(is this [a-z]+|are you [a-z]+|is this your new number)\b", latest, re.IGNORECASE)
+                if script_key == "script1":
+                    return not re.search(r"\bwho(['\s]|$)|\bwhos\b|\bwho is\b", latest, re.IGNORECASE)
+                if script_key == "script3":
+                    return not re.search(r"\b(why|reason|what for)\b", latest, re.IGNORECASE)
+                if script_key == "script6":
+                    return not re.search(r"\b(new phone|got (a )?new phone|new device)\b", latest, re.IGNORECASE)
+                if script_key == "script7":
+                    return not re.search(r"\b(what phone|which phone|what device|what iphone)\b", latest, re.IGNORECASE)
+                return False
+
+            if violates_priority(script_id, latest_msg.lower()):
+                decision_action = "NO_SEND"
+                decision_response = ""
+                decision["reasoning"] = "Script keywords not present in latest inbound message"
+                script_id = ""
+
             latest_fingerprint_source = latest_norm or latest_msg.lower().strip() or "(none)"
             latest_hash = hashlib.sha1(latest_fingerprint_source.encode("utf-8")).hexdigest()[:12]
             msg_key = f"{device_id}:{contact_id}:{script_id}:{latest_hash}:{turn_count}"
