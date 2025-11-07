@@ -15,60 +15,33 @@ if not CLAUDE_API_KEY:
     print("ERROR: CLAUDE_API_KEY environment variable not set!")
 client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
-# System prompt for the AI - INTELLIGENT CONTEXT-AWARE SCRIPT SELECTION
-SYSTEM_PROMPT = """You are an intelligent SMS automation assistant. Read the FULL conversation context and understand what the person is asking about. Then intelligently select the most appropriate response.
+# System prompt for the AI - SIMPLE CONTEXT-AWARE SCRIPT SELECTION
+SYSTEM_PROMPT = """You are an SMS automation assistant. Read the ENTIRE conversation and pick the right script.
 
-You have 8 scripts available:
+SCRIPTS:
+1. "Your eldest and favourite" → They ask WHO you are
+2. "Yes I'll be using this number from now on" → They ask about IDENTITY (specific name) or "is this your new number"
+3. "I'll be using this number from now on because i've got a new plan with O2" → They ask WHY
+4. "Do not worry i will get it cancelled" → They ask about CONTRACT
+5. "sorry i meant EE" → They say you were already with O2
+6. "Yes ill be using this number from now" → They ask if you got NEW PHONE
+7. "I got the Iphone 16" → They ask WHAT PHONE you got
+8. AI-generated response → They ask HOW YOU ARE (generate caring son/daughter-to-dad response)
 
-Script 1: "Your eldest and favourite" 
-- Use when: Person is asking WHO YOU ARE (generic who question)
-- Context clues: "who", "whos", "who is", "who r u", "whose", etc.
-
-Script 2: "Yes I'll be using this number from now on"
-- Use when: Person is asking about your IDENTITY (confirming if you are someone specific) OR asking about new number
-- Context clues: Mentions a specific name ("is this james", "are you john") OR asking "is this your new number"
-
-Script 3: "I'll be using this number from now on because i've got a new plan with O2"
-- Use when: Person is asking WHY you're using this number or WHY you're saving it
-- Context clues: "why", "reason", "what for", etc.
-
-Script 4: "Do not worry i will get it cancelled"
-- Use when: Person is asking about old contract/plan or cancellation
-- Context clues: "contract", "old plan", "cancel", "payment plan", etc.
-
-Script 5: "sorry i meant EE"
-- Use when: Person is saying/implying you were already with O2 (confused)
-- Context clues: "i thought you were with O2", "weren't you already with O2", etc.
-
-Script 6: "Yes ill be using this number from now"
-- Use when: Person is asking if you got a NEW PHONE
-- Context clues: "did you get a new phone", "have you got a new phone", "new phone", "new device"
-
-Script 7: "I got the Iphone 16"
-- Use when: Person is asking WHAT PHONE you got (asking about phone model/type)
-- Context clues: "what phone", "which phone", "what device", "what iphone", etc.
-
-Script 8: AI-generated (son/daughter to dad tone)
-- Use when: Person is asking HOW YOU ARE or about your wellbeing
-- Context clues: "how are you", "how you doing", "you ok", "you alright", "how's everything", etc.
-- Generate a caring, natural response as a son/daughter would text their dad
-
-Always respond with JSON:
+RESPOND WITH JSON:
 {
   "action": "SEND" or "NO_SEND",
-  "response": "EXACT script text or generated response for Script 8, or empty",
-  "reasoning": "Which script best fits the context and why"
+  "response": "Exact script text or generated response or empty",
+  "reasoning": "Why"
 }
 
-CRITICAL RULES:
-- Read FULL conversation context to understand intent
-- Use AI intelligence to match scripts, not just pattern matching
-- Each script addresses a DIFFERENT intent
-- If person's message doesn't clearly match any script's intent = NO_SEND
-- Use EXACT script text for Scripts 1-7
-- For Script 8, generate natural caring response
-- Be case-insensitive
-- Handle typos and informal language
+RULES:
+- Read the FULL conversation
+- Match the LATEST message intent to one script
+- Send ONLY if it matches clearly
+- Use EXACT script text for 1-7
+- Generate natural response for 8
+- If unclear or no match: NO_SEND
 """
 
 @app.route('/respond', methods=['POST'])
@@ -124,38 +97,10 @@ def get_response():
         
         # Build user message for Claude
         user_message = f"""
-READ THE ENTIRE CONVERSATION BELOW CAREFULLY:
-
+Full conversation:
 {conversation_text}
 
----
-
-THIS IS THE MOST RECENT MESSAGE (what just came in):
-{conversation_text.split(chr(10))[-1] if conversation_text else "(no message)"}
-
----
-
-BEFORE responding:
-1. Understand WHAT the person is asking about
-2. Check if you've ALREADY responded to this type of question in this conversation
-3. Make sure you're not sending the same script twice
-
-Available Scripts:
-Script 1: "Your eldest and favourite"
-Script 2: "Yes I'll be using this number from now on"
-Script 3: "I'll be using this number from now on because i've got a new plan with O2"
-Script 4: "Do not worry i will get it cancelled"
-Script 5: "sorry i meant EE"
-Script 6: "Yes ill be using this number from now"
-Script 7: "I got the Iphone 16"
-Script 8: Generate a caring response as a son/daughter would to their dad
-
-DECISION:
-- Read the FULL conversation
-- Understand what was ALREADY sent
-- Only respond if the question is NEW or DIFFERENT from before
-- If you already responded to this topic, send NO_SEND
-- If it's a new question that matches a script, send the script
+What should I respond with? Read the full context and pick the right script.
 """
         
         # Call Claude
