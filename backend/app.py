@@ -82,13 +82,14 @@ Script 8 AI-GENERATED (How Are You)
     - No emojis; keep it conversational and concise
 
 Script 9 AI-GENERATED (Greeting Response)
-  TRIGGER: They send a simple greeting (Hi, Hello, Hey, Hi [name], Hello [name], etc.)
-  Keywords: "hi", "hello", "hey", "hi there", "hey there"
-  Examples: "Hi", "Hello", "Hey James", "Hi there", "Hello [name]"
-  Action: Generate a friendly, natural greeting response as a son/daughter would to dad
+  TRIGGER: They send a simple greeting (Hi, Hello, Hey, Hi [name], Hello [name], Hi dad, Hi mum, etc.)
+  Keywords: "hi", "hello", "hey", "hi there", "hey there", "hi dad", "hi mum", "hello dad", "hello mum"
+  Examples: "Hi", "Hello", "Hey James", "Hi there", "Hello [name]", "Hi dad", "Hi mum", "Hello dad"
+  Action: Generate a friendly, natural greeting response as a son/daughter would to dad/mum
   Length & form: Keep it brief and match their tone
     - If they say "Hi" or "Hello", respond with a simple greeting back
     - If they say "Hi [name]" or "Hello [name]", acknowledge them naturally
+    - If they say "Hi dad" or "Hi mum", respond warmly as their child would
   Tone & content:
     - Friendly, warm, casual
     - Keep it short (1-2 sentences max)
@@ -119,7 +120,7 @@ PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - Else if contains "is this [name]"/"are you [name]"/"is this your new number" → Script 2
 - Else if contains EXPLICIT how-are-you question (how are you/how you doing/you ok/you alright/how's everything/how are things) ANYWHERE in message → Script 8 (takes priority over greetings)
 - Else if contains generic who (who/whos/who is/who r u/hu/whose) → Script 1
-- Else if contains simple greeting (hi/hello/hey/hi there/hello there) at start → Script 9
+- Else if contains simple greeting (hi/hello/hey/hi there/hello there/hi dad/hi mum/hello dad/hello mum) at start → Script 9
 - Otherwise → NO_SEND
 
 RESPOND WITH JSON:
@@ -138,7 +139,7 @@ INTERNAL PROCESS (do not include in output):
   8. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things" ANYWHERE in message → HOW_YOU (check entire message, not just start)
   9. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" → WHO
   10. Contains "already with O2"/"thought you were O2" → ALREADY_O2
-  11. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there") at start of message AND no questions → GREETING
+  11. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there"/"hi dad"/"hi mum"/"hello dad"/"hello mum") at start of message AND no questions → GREETING
   12. Otherwise → NONE
 - Then map: WHO → Script 1, NAME_ID → Script 2, WHY → Script 3, CONTRACT → Script 4, ALREADY_O2 → Script 5, NEW_PHONE → Script 6, WHAT_PHONE → Script 7, HOW_YOU → Script 8, GREETING → Script 9, NONE → NO_SEND
 
@@ -151,6 +152,7 @@ EXAMPLES (for clarity, not to output):
 - Latest: "what about the contract i pay for" → Class: CONTRACT (contains "contract") → SEND Script 4
 - Latest: "Oh hi James how are you, please don't forget the milk" → Class: HOW_YOU (contains "how are you" anywhere in message) → SEND Script 8 (AI-generated response)
 - Latest: "Hi James" → Class: GREETING (simple greeting, no questions) → SEND Script 9 (AI-generated greeting)
+- Latest: "Hi dad" → Class: GREETING (simple greeting with relationship term) → SEND Script 9 (AI-generated greeting)
 - Latest: "Hello" → Class: GREETING (simple greeting) → SEND Script 9 (AI-generated greeting)
 - Latest: "how are you" → Class: HOW_YOU (explicit question) → SEND Script 8 (AI-generated response)
 
@@ -345,12 +347,12 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                     if len(response_text) > 30 and re.search(r"\b(how are you|how you doing|you ok|you alright|how's everything|how are things|how have you been)\b", latest, re.IGNORECASE):
                         return False  # Script 8 matches
                     # Check if it's likely Script 9 (greeting response) - response will be short greeting
-                    if len(response_text) <= 30 and re.search(r"^(hi|hello|hey|hi there|hello there)\b", latest, re.IGNORECASE):
+                    if len(response_text) <= 30 and re.search(r"^(hi|hello|hey|hi there|hello there|hi dad|hi mum|hello dad|hello mum)\b", latest, re.IGNORECASE):
                         return False  # Script 9 matches
                     # If AI-generated but doesn't match Script 8 or 9 patterns, check if latest has the right keywords
                     if re.search(r"\b(how are you|how you doing|you ok|you alright|how's everything|how are things|how have you been)\b", latest, re.IGNORECASE):
                         return False  # Script 8 keywords present
-                    if re.search(r"^(hi|hello|hey|hi there|hello there)\b", latest, re.IGNORECASE):
+                    if re.search(r"^(hi|hello|hey|hi there|hello there|hi dad|hi mum|hello dad|hello mum)\b", latest, re.IGNORECASE):
                         return False  # Script 9 keywords present
                     return True  # AI-generated but no matching keywords
                 return False
