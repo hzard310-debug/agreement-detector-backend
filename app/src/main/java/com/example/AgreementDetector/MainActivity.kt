@@ -66,10 +66,15 @@ class MainActivity : AppCompatActivity() {
         // Auto-scan messages if AI mode is enabled
         val settings = getSharedPreferences("settings", MODE_PRIVATE)
         if (settings.getBoolean("ai_response_enabled", false)) {
+            // Start foreground service to keep app alive when screen is locked
+            SmsProcessingService.start(this)
             // Delay scan slightly to let app initialize
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 com.example.agreementdetector.ai.MessageScanner.scanAllMessages(this)
             }, 2000)
+        } else {
+            // Stop service if AI is disabled
+            SmsProcessingService.stop(this)
         }
     }
     

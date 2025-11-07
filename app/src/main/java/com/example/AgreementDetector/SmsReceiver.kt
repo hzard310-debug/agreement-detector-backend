@@ -87,20 +87,33 @@ class SmsReceiver : BroadcastReceiver() {
                 return
             }
             
-            // AI is enabled - process message through AI backend
-                val messageBody = body // Store in outer scope for deletion
-                val messageSender = sender // Store in outer scope for deletion
+            // CRITICAL: Pass SMS to foreground service for processing (service will handle everything)
+            // This ensures processing continues even when screen is locked
+            try {
+                SmsProcessingService.startWithSms(context.applicationContext, sender, body)
+                Log.d("SmsReceiver", "Passed SMS to foreground service for processing (works even when screen is locked)")
+                // Finish receiver immediately - service will handle processing
+                pendingResult.finish()
+                return
+            } catch (e: Exception) {
+                Log.e("SmsReceiver", "Failed to start service with SMS: ${e.message}", e)
+                // Fallback to processing in receiver if service fails
+            }
+            
+            // FALLBACK: Process in receiver if service fails (shouldn't normally happen)
+            val messageBody = body
+            val messageSender = sender
                 
-                // Acquire wake lock to keep device awake while processing (even if screen is off)
-                val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-                val wakeLock = powerManager?.newWakeLock(
-                    PowerManager.PARTIAL_WAKE_LOCK,
-                    "AgreementDetector::SmsProcessing"
-                )
-                wakeLock?.acquire(60000) // Hold for up to 60 seconds
+            // Acquire wake lock to keep device awake while processing (even if screen is off)
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            val wakeLock = powerManager?.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "AgreementDetector::SmsProcessing"
+            )
+            wakeLock?.acquire(60000) // Hold for up to 60 seconds
                 
-                Log.d("SmsReceiver", "AI enabled - querying Claude AI for response (wake lock acquired for background processing, goAsync() extends receiver lifetime)")
-                Thread {
+            Log.d("SmsReceiver", "FALLBACK: Processing SMS in receiver (service failed to start)")
+            Thread {
                     try {
                         // Get FULL conversation history - collect ALL messages (no limit)
                         // This ensures AI reads the complete chat context - ALL messages from entire conversation
