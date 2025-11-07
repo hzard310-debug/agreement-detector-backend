@@ -7,6 +7,8 @@ app = Flask(__name__)
 
 # Initialize Claude client with API key from environment
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+if not CLAUDE_API_KEY:
+    print("ERROR: CLAUDE_API_KEY environment variable not set!")
 client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
 # System prompt for the AI - INTELLIGENT CONVERSATION AUTOMATION
@@ -132,6 +134,8 @@ Should I send this script NOW based on the conversation context? If yes, send it
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
+        print(f"ERROR in /respond: {str(e)}")
+        print(error_details)
         return jsonify({
             "action": "NO_SEND",
             "error": str(e),
