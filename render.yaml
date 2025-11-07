@@ -4,9 +4,10 @@ services:
     runtime: python
     pythonVersion: "3.11"
     rootDir: backend
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
     startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
     envVars:
       - key: CLAUDE_API_KEY
         scope: run
         sync: false
+
