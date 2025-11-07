@@ -15,29 +15,37 @@ if not CLAUDE_API_KEY:
     print("ERROR: CLAUDE_API_KEY environment variable not set!")
 client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
-# System prompt for the AI - RESPOND ONLY TO WHO QUESTIONS
-SYSTEM_PROMPT = """You are an SMS automation assistant. Your ONLY job is to respond to questions about who the sender is.
+# System prompt for the AI - 2-SCRIPT INTELLIGENT DETECTION
+SYSTEM_PROMPT = """You are an SMS automation assistant with 2 scripts to choose from based on context.
 
 Your job:
-1. Read the last message from them
-2. Determine if they are asking WHO YOU ARE (e.g., "who's this?", "is this [name]?", "whos this", etc.)
-3. If they ARE asking who you are: return the provided script EXACTLY
-4. If they are NOT asking who you are: return NO_SEND
+1. Read the FULL conversation context, especially the latest message from them
+2. Determine which script fits the situation:
+
+SCRIPT 1: "Your eldest and favourite"
+- Use when they ask WHO YOU ARE
+- Examples: "who is this", "whos this", "who's this", "who dis"
+- Must be asking about your identity
+
+SCRIPT 2: "Yes I'll be using this number from now on"
+- Use when they ask about IDENTITY CONFIRMATION or NEW NUMBER
+- Examples: "is this [name]?", "are you [name]?", "[name]?", "john", "is this your new number?"
+- Must be confirming identity with a name OR asking about new number
+- For names: verify it's a realistic person name (even unique ones)
 
 Always respond with JSON:
 {
   "action": "SEND" or "NO_SEND",
-  "response": "the provided script if asking who, empty if NO_SEND",
-  "reasoning": "brief explanation"
+  "response": "Script 1 or Script 2 text, or empty if NO_SEND",
+  "reasoning": "which script and why, or why no send"
 }
 
 Rules:
-- ONLY send if the latest message is asking who you are
-- Examples of "who are you" questions: "whos this", "who is this", "who's this", "who dis"
-- Do NOT respond to "is this [name]" - that's not a who question
-- If they ask anything else, return NO_SEND
-- If sending, use the provided script EXACTLY as given
-- Do NOT send for greetings, statements, or unrelated questions
+- Read FULL message context to understand intent
+- ONLY send if message clearly matches one of the 2 script triggers
+- Use EXACT script text when sending
+- Return NO_SEND for anything else (greetings, unrelated questions, etc.)
+- Be smart about context - understand what they're really asking
 """
 
 @app.route('/respond', methods=['POST'])
@@ -99,9 +107,11 @@ Contact: {contact_id}
 Conversation:
 {conversation_text}
 
-Script to potentially send: "{script}"
+Available Scripts:
+Script 1: "Your eldest and favourite"
+Script 2: "Yes I'll be using this number from now on"
 
-Should I send this script NOW based on the conversation context? If yes, send it exactly as provided.
+Should I send one of these scripts NOW based on the conversation context? If yes, respond with the exact script text.
 """
         
         # Call Claude
@@ -140,20 +150,28 @@ Should I send this script NOW based on the conversation context? If yes, send it
         decision_response = decision.get("response", "")
         
         if decision_action == "SEND" and decision_response:
-            # Create unique key for this message
-            msg_key = f"{device_id}:{contact_id}:{script}"
+            # Create unique key for this message/script combination
+            # Normalize the response to identify which script it is
+            if "Your eldest and favourite" in decision_response:
+                script_id = "script1"
+            elif "Yes I'll be using this number from now on" in decision_response:
+                script_id = "script2"
+            else:
+                script_id = decision_response[:20]  # fallback to first 20 chars
+            
+            msg_key = f"{device_id}:{contact_id}:{script_id}"
             
             # Check if we've already sent this message
             if msg_key in sent_tracker:
                 # Already sent before - don't send again per user rules
-                print(f"DUPLICATE: Already sent '{script}' to {contact_id}")
+                print(f"DUPLICATE: Already sent '{script_id}' to {contact_id}")
                 decision_action = "NO_SEND"
                 decision_response = ""
                 decision["reasoning"] = "Already sent this message to this contact (duplicate prevention)"
             else:
                 # First time - record it
                 sent_tracker[msg_key] = datetime.now().isoformat()
-                print(f"TRACKED: Sent '{script}' to {contact_id}")
+                print(f"TRACKED: Sending '{script_id}' to {contact_id}")
         
         # Format response for Android app
         result = {
