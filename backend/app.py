@@ -170,6 +170,7 @@ def get_response():
 
         # Build conversation for Claude and capture latest inbound message text
         latest_inbound = ""
+        turn_count = 0
         if turns:
             conversation_lines = []
             parsed_turns = []
@@ -191,6 +192,7 @@ def get_response():
                     continue
 
                 parsed_turns.append({'role': role, 'text': text})
+                turn_count += 1
                 prefix = 'You' if role == 'you' else 'Them'
                 conversation_lines.append(f"{prefix}: {text}")
 
@@ -284,22 +286,32 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 script_id = "script7"
             else:
                 script_id = decision_response[:20]  # fallback to first 20 chars (Script 8 AI-generated)
-            
+
             latest_fingerprint_source = latest_norm or latest_msg.lower().strip() or "(none)"
             latest_hash = hashlib.sha1(latest_fingerprint_source.encode("utf-8")).hexdigest()[:12]
-            msg_key = f"{device_id}:{contact_id}:{script_id}:{latest_hash}"
-            
+            msg_key = f"{device_id}:{contact_id}:{script_id}:{latest_hash}:{turn_count}"
+
             # Check if we've already sent this message
-            if msg_key in sent_tracker:
-                # Already sent before - don't send again per user rules
-                print(f"DUPLICATE: Already sent '{script_id}' to {contact_id}")
+            allow_send = True
+            prev_ts = sent_tracker.get(msg_key)
+            if prev_ts:
+                try:
+                    prev_dt = datetime.fromisoformat(prev_ts)
+                except Exception:
+                    prev_dt = None
+                if prev_dt and (datetime.now() - prev_dt) <= timedelta(minutes=10):
+                    allow_send = False
+                    print(f"DUPLICATE: Already sent '{script_id}' to {contact_id} within 10 minutes")
+                else:
+                    print(f"RE-SEND: Allowing '{script_id}' to {contact_id} (previous send stale or invalid timestamp)")
+
+            if allow_send:
+                sent_tracker[msg_key] = datetime.now().isoformat()
+                print(f"TRACKED: Sending '{script_id}' to {contact_id}")
+            else:
                 decision_action = "NO_SEND"
                 decision_response = ""
                 decision["reasoning"] = "Already sent this message to this contact (duplicate prevention)"
-            else:
-                # First time - record it
-                sent_tracker[msg_key] = datetime.now().isoformat()
-                print(f"TRACKED: Sending '{script_id}' to {contact_id}")
         
         # Format response for Android app
         result = {
