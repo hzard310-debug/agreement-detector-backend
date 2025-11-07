@@ -86,6 +86,11 @@ DECISION PROCESS:
 
 RESPOND WITH JSON:
 {"action": "SEND" or "NO_SEND", "response": "exact text or generated", "reasoning": "which script and why"}
+
+OUTPUT POLICY:
+- Scripts 1–7: The response MUST be EXACTLY the script text shown above, with the same wording, capitalization and punctuation. NO extra words, NO greetings, NO emojis, NO signatures.
+- Script 8: Respond only with the message content (no preambles). Mirror length (sentence vs short paragraph), keep warm and low‑key, no emojis, no exclamation spam, and DO NOT mention the new number unless they asked.
+- Never combine scripts or add commentary. Choose ONE script or NO_SEND.
 """
 
 @app.route('/respond', methods=['POST'])
