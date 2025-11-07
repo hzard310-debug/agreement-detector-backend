@@ -33,7 +33,8 @@ Always respond with JSON:
 
 Rules:
 - ONLY send if the latest message is asking who you are
-- Examples of "who are you" questions: "whos this", "who is this", "is this [name]", "who's this", "who dis"
+- Examples of "who are you" questions: "whos this", "who is this", "who's this", "who dis"
+- Do NOT respond to "is this [name]" - that's not a who question
 - If they ask anything else, return NO_SEND
 - If sending, use the provided script EXACTLY as given
 - Do NOT send for greetings, statements, or unrelated questions
