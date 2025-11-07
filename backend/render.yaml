@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: agreement-detector-api
+    runtime: python
+    pythonVersion: 3.11
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: CLAUDE_API_KEY
+        scope: run
+        sync: false
