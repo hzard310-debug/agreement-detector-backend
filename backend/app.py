@@ -664,6 +664,48 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
         # Check for duplicates - prevent sending the same message to the same contact twice
         decision_action = decision.get("action", "NO_SEND")
         decision_response = decision.get("response", "")
+        decision_reasoning = decision.get("reasoning", "").lower()
+        
+        # CRITICAL: If Script 1 is detected (from reasoning or response), ALWAYS use exact script text
+        if decision_action == "SEND" and decision_response:
+            # Check if reasoning indicates Script 1 OR if response doesn't match Script 1 exactly
+            is_script1 = (
+                "script 1" in decision_reasoning or 
+                "script1" in decision_reasoning or 
+                "generic 'who' question" in decision_reasoning or
+                ("who" in decision_reasoning and "script" in decision_reasoning and "1" in decision_reasoning)
+            )
+            
+            # Also check if response contains placeholders or doesn't match Script 1 exactly
+            response_lower = decision_response.lower()
+            has_placeholder = "[your name]" in decision_response or "[name]" in decision_response or "it's me" in response_lower
+            is_not_exact_script1 = "Your eldest and favourite" not in decision_response
+            
+            if is_script1 or (has_placeholder and is_not_exact_script1):
+                # Preserve kisses if present in Claude's response
+                kisses = None
+                if decision_response:
+                    end_patterns = [
+                        r'([xX]{2,})\s*$',
+                        r'\s+([xX]{2,})\s*$',
+                        r'([xX]{2,})[\.\?\!]*\s*$',
+                    ]
+                    for pattern in end_patterns:
+                        end_match = re.search(pattern, decision_response, re.MULTILINE)
+                        if end_match:
+                            kisses = end_match.group(1)
+                            break
+                    if not kisses:
+                        any_match = re.search(r'([xX]{2,})', decision_response)
+                        if any_match:
+                            kisses = any_match.group(1)
+                
+                # Always use exact Script 1 text
+                decision_response = "Your eldest and favourite"
+                if kisses:
+                    decision_response = decision_response + " " + kisses
+                decision["response"] = decision_response
+                print(f"FORCED SCRIPT 1: Replaced response with exact Script 1 text (original was: {decision.get('response', '')[:50]})")
         
         script_id = ""
         if decision_action == "SEND" and decision_response:
@@ -826,12 +868,20 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 except Exception:
                     prev_dt = None
                 if prev_dt and (datetime.now() - prev_dt) <= timedelta(hours=24):
-                    # We've already sent this response - ask Claude for an alternative
-                    allow_send = False
-                    print(f"DUPLICATE RESPONSE: Already sent similar response to {contact_id}, requesting alternative")
-                    
-                    # Ask Claude again with instruction to generate alternative
-                    alt_user_message = f"""
+                    # Check if this is a fixed script (1-7, 9, 12, 13) - these should ALWAYS use exact script text
+                    fixed_scripts = ["script1", "script2", "script3", "script4", "script5", "script6", "script7", "script9", "script12", "script13"]
+                    if script_id in fixed_scripts:
+                        # For fixed scripts, allow sending the same exact script text (it's the correct response)
+                        # Don't request alternatives for fixed scripts - they must be exact
+                        print(f"DUPLICATE FIXED SCRIPT: Already sent {script_id} to {contact_id}, but allowing exact script text")
+                        allow_send = True  # Allow sending the exact script text
+                    else:
+                        # For AI-generated scripts (8, 10, 11), request an alternative
+                        allow_send = False
+                        print(f"DUPLICATE RESPONSE: Already sent similar response to {contact_id}, requesting alternative")
+                        
+                        # Ask Claude again with instruction to generate alternative
+                        alt_user_message = f"""
 FULL CONVERSATION:
 {conversation_text}
 
@@ -851,51 +901,51 @@ DO NOT repeat this message. Generate a DIFFERENT, ALTERNATIVE response that:
 
 Analyze the conversation and provide an ALTERNATIVE response.
 """
-                    
-                    try:
-                        alt_message = client.messages.create(
-                            model="claude-3-haiku-20240307",
-                            max_tokens=350,
-                            system=SYSTEM_PROMPT,
-                            messages=[
-                                {"role": "user", "content": alt_user_message}
-                            ]
-                        )
-                        alt_response_text = alt_message.content[0].text
                         
-                        # Parse alternative response
-                        if "{" in alt_response_text and "}" in alt_response_text:
-                            json_start = alt_response_text.find("{")
-                            json_end = alt_response_text.rfind("}") + 1
-                            json_str = alt_response_text[json_start:json_end]
-                            alt_decision = json.loads(json_str)
+                        try:
+                            alt_message = client.messages.create(
+                                model="claude-3-haiku-20240307",
+                                max_tokens=350,
+                                system=SYSTEM_PROMPT,
+                                messages=[
+                                    {"role": "user", "content": alt_user_message}
+                                ]
+                            )
+                            alt_response_text = alt_message.content[0].text
                             
-                            # Use alternative if it's different
-                            alt_response = alt_decision.get("response", "").strip()
-                            alt_response_norm = re.sub(r'[^a-z0-9 ]+', '', alt_response.lower().strip())
-                            alt_response_norm = re.sub(r'\b[xX]{2,}\b', '', alt_response_norm).strip()
-                            
-                            if alt_response and alt_response_norm != response_normalized_no_kisses:
-                                decision_action = alt_decision.get("action", "NO_SEND")
-                                decision_response = alt_response
-                                decision["reasoning"] = alt_decision.get("reasoning", "Alternative response generated to avoid duplicate")
-                                # Recalculate response_key for the alternative response
-                                response_key = f"{device_id}:{contact_id}:response:{hashlib.sha1(alt_response_norm.encode('utf-8')).hexdigest()[:16]}"
-                                print(f"ALTERNATIVE: Generated alternative response for {contact_id}")
-                                allow_send = True  # Allow the alternative
+                            # Parse alternative response
+                            if "{" in alt_response_text and "}" in alt_response_text:
+                                json_start = alt_response_text.find("{")
+                                json_end = alt_response_text.rfind("}") + 1
+                                json_str = alt_response_text[json_start:json_end]
+                                alt_decision = json.loads(json_str)
+                                
+                                # Use alternative if it's different
+                                alt_response = alt_decision.get("response", "").strip()
+                                alt_response_norm = re.sub(r'[^a-z0-9 ]+', '', alt_response.lower().strip())
+                                alt_response_norm = re.sub(r'\b[xX]{2,}\b', '', alt_response_norm).strip()
+                                
+                                if alt_response and alt_response_norm != response_normalized_no_kisses:
+                                    decision_action = alt_decision.get("action", "NO_SEND")
+                                    decision_response = alt_response
+                                    decision["reasoning"] = alt_decision.get("reasoning", "Alternative response generated to avoid duplicate")
+                                    # Recalculate response_key for the alternative response
+                                    response_key = f"{device_id}:{contact_id}:response:{hashlib.sha1(alt_response_norm.encode('utf-8')).hexdigest()[:16]}"
+                                    print(f"ALTERNATIVE: Generated alternative response for {contact_id}")
+                                    allow_send = True  # Allow the alternative
+                                else:
+                                    decision_action = "NO_SEND"
+                                    decision_response = ""
+                                    decision["reasoning"] = "Could not generate alternative response (too similar to previous)"
                             else:
                                 decision_action = "NO_SEND"
                                 decision_response = ""
-                                decision["reasoning"] = "Could not generate alternative response (too similar to previous)"
-                        else:
+                                decision["reasoning"] = "Could not parse alternative response"
+                        except Exception as e:
+                            print(f"ERROR generating alternative: {e}")
                             decision_action = "NO_SEND"
                             decision_response = ""
-                            decision["reasoning"] = "Could not parse alternative response"
-                    except Exception as e:
-                        print(f"ERROR generating alternative: {e}")
-                        decision_action = "NO_SEND"
-                        decision_response = ""
-                        decision["reasoning"] = "Error generating alternative response"
+                            decision["reasoning"] = "Error generating alternative response"
             
             # Also check script_id duplicate (original check)
             prev_ts = sent_tracker.get(msg_key)
