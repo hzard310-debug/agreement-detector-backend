@@ -811,19 +811,25 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                     # Match "is this [name]" or "are you [name]" or "is this your new number" or "this is your new number" or "this your new number" or "delete old number" or "permanent/temporary/work/personal"
                     # Handle names with any case and optional punctuation at the end
                     # Use [a-zA-Z]+ to match names regardless of case (character classes don't respect IGNORECASE)
-                    pattern = r"\b(is this [a-zA-Z]+|are you [a-zA-Z]+|is this your new number|this is your new number|this your new number|should I delete your old number|delete your old number|delete old number|permanent number|temporary number|new permanent number|new temporary number|work number|personal number)\b"
+                    # Make patterns more flexible to catch variations with punctuation and spacing
+                    pattern = r"(is\s+this\s+[a-zA-Z]+|are\s+you\s+[a-zA-Z]+|is\s+this\s+your\s+new\s+number|this\s+is\s+your\s+new\s+number|this\s+your\s+new\s+number|should\s+I\s+delete\s+your\s+old\s+number|delete\s+your\s+old\s+number|delete\s+old\s+number|permanent\s+number|temporary\s+number|new\s+permanent\s+number|new\s+temporary\s+number|work\s+number|personal\s+number)"
                     # Also check for "this your new permanent number" or similar patterns (without "is")
                     pattern2 = r"(this|that)\s+(is\s+)?(your|the)\s+(new\s+)?(permanent|temporary|work|personal)?\s*number"
-                    # Also check for "this is your new number" or "this your new number" (without permanent/temporary/work/personal)
+                    # Also check for "this is your new number" or "this your new number" (without permanent/temporary/work/personal) - more flexible
                     pattern3 = r"(this|that)\s+(is\s+)?(your|the)\s+new\s+number"
+                    # Check for "new number" in general (more flexible)
+                    pattern4 = r"(is\s+this|this\s+is|this)\s+(your|the)?\s*new\s+number"
                     # Also check for standalone "permanent", "temporary", "work", "personal" in context of number
-                    if re.search(pattern, latest, re.IGNORECASE) or re.search(pattern2, latest, re.IGNORECASE) or re.search(pattern3, latest, re.IGNORECASE):
+                    if re.search(pattern, latest, re.IGNORECASE) or re.search(pattern2, latest, re.IGNORECASE) or re.search(pattern3, latest, re.IGNORECASE) or re.search(pattern4, latest, re.IGNORECASE):
                         return False
                     # Check for "permanent" or "temporary" in context of number (even if "new" is between them)
                     if re.search(r"(permanent|temporary)", latest, re.IGNORECASE) and re.search(r"(number|num)", latest, re.IGNORECASE):
                         return False
                     # Check for "work" or "personal" in context of number
                     if re.search(r"\b(work|personal)\b", latest, re.IGNORECASE) and re.search(r"\b(number|num)\b", latest, re.IGNORECASE):
+                        return False
+                    # Check for "new number" anywhere in the message (as a fallback for Script 2)
+                    if re.search(r"new\s+number", latest, re.IGNORECASE):
                         return False
                     return True
                 if script_key == "script1":
