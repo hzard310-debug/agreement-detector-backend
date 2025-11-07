@@ -132,15 +132,15 @@ Should I send this script NOW based on the conversation context? If yes, send it
         
         return jsonify(result), 200
         
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            return jsonify({
-                "action": "NO_SEND",
-                "error": str(e),
-                "details": error_details,
-                "timestamp": datetime.now().isoformat()
-            }), 500
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return jsonify({
+            "action": "NO_SEND",
+            "error": str(e),
+            "details": error_details,
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 @app.route('/health', methods=['GET'])
 def health():
