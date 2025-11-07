@@ -51,15 +51,17 @@ Always respond with JSON:
   "reasoning": "which script was selected and why, or why no send"
 }
 
-Rules - VERY SIMPLE:
+Rules - VERY SIMPLE (case-insensitive matching):
 1. If message contains WHO words (who, whos, whose, hu, etc.) = Script 1
-2. If message contains "is this" (but not "is this this") = Script 2
-3. If message contains "are you" = Script 2  
-4. If message is JUST a name with "?" (like "john?", "jermaine?") = Script 2
+   - Works with: "WHO is this", "who is this", "Whos this", "WHO'S THIS", etc.
+2. If message contains "is this" (case-insensitive, but not "is this this") = Script 2
+   - Works with: "is this jermaine", "IS THIS JERMAINE", "Is This John", etc.
+3. If message contains "are you" (case-insensitive) = Script 2
+   - Works with: "are you john", "ARE YOU JERMAINE", etc.
+4. If message is JUST a name with "?" (like "john?", "JERMAINE?") = Script 2
 5. If message contains "is this your new number" = Script 2
 6. Everything else = NO_SEND
-- DO NOT try to validate if the word is a real name
-- Just match the PATTERNS
+- Match PATTERNS case-insensitively
 - Use EXACT script text when sending
 """
 
