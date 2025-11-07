@@ -321,7 +321,8 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                 if script_key == "script2":
                     # Match "is this [name]" or "are you [name]" or "is this your new number"
                     # Handle names with any case and optional punctuation at the end
-                    pattern = r"\b(is this [a-z]+|are you [a-z]+|is this your new number)[\s\?\!\.]*"
+                    # Use [a-zA-Z]+ to match names regardless of case (character classes don't respect IGNORECASE)
+                    pattern = r"\b(is this [a-zA-Z]+|are you [a-zA-Z]+|is this your new number)[\s\?\!\.]*"
                     return not re.search(pattern, latest, re.IGNORECASE)
                 if script_key == "script1":
                     return not re.search(r"\bwho(['\s]|$)|\bwhos\b|\bwho is\b", latest, re.IGNORECASE)
