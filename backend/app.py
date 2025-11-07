@@ -341,9 +341,9 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                     prev_dt = datetime.fromisoformat(prev_ts)
                 except Exception:
                     prev_dt = None
-                if prev_dt and (datetime.now() - prev_dt) <= timedelta(minutes=10):
+                if prev_dt and (datetime.now() - prev_dt) <= timedelta(minutes=2):
                     allow_send = False
-                    print(f"DUPLICATE: Already sent '{script_id}' to {contact_id} within 10 minutes")
+                    print(f"DUPLICATE: Already sent '{script_id}' to {contact_id} within 2 minutes")
                 else:
                     print(f"RE-SEND: Allowing '{script_id}' to {contact_id} (previous send stale or invalid timestamp)")
 
