@@ -33,18 +33,16 @@ SCRIPT 1: "Your eldest and favourite"
 
 SCRIPT 2: "Yes I'll be using this number from now on"
 - Use when they ask about IDENTITY WITH A SPECIFIC NAME or CONFIRMING NEW NUMBER
-- Examples that trigger Script 2:
-  * "is this jermaine?" - asking if you ARE a specific person (common or uncommon name)
-  * "are you zainab?" - asking if you ARE a specific person
-  * "jermaine?" - just a name with question mark (even uncommon names)
-  * "is this your new number?" - asking about the number
-- Key: Smart name detection that handles UNCOMMON names too
-  - If it's "is this [word]" where [word] is a proper noun/name = Script 2
-  - If it's "are you [word]" where [word] is a proper noun/name = Script 2
-  - If it's just "[word]?" where [word] could be a name = Script 2
-  - "is this your new number" = Script 2
-  - "is this a pizza" = NO (pizza is not a person name)
-  - Use context and reasoning to identify real names (even uncommon/unique ones)
+- Trigger patterns (VERY DIRECT):
+  * Contains "is this" + NOT "your number" = Script 2
+    - "is this jermaine?" → Script 2
+    - "is this john" → Script 2
+    - "is this your new number?" → Script 2 (contains "new number")
+  * Contains "are you" + word after = Script 2
+    - "are you jermaine?" → Script 2
+  * Just a single word with "?" = Script 2
+    - "jermaine?" → Script 2
+- Do NOT overthink: if message says "is this [anything]" where [anything] is not "this", send Script 2
 
 Always respond with JSON:
 {
@@ -53,18 +51,16 @@ Always respond with JSON:
   "reasoning": "which script was selected and why, or why no send"
 }
 
-Rules:
-- Read FULL message to determine which script applies
-- If asking WHO generically (any variation: who, whose, hu, etc.) = Script 1
-- If asking "is this [NAME]" or "are you [NAME]" where NAME is a person's name = Script 2
-  * Works with common names: john, jane, ahmed, etc.
-  * Works with uncommon/unique names too: zainab, jermaine, xyz (if used as a name)
-- If asking "is this your new number" = Script 2
-- Use context to distinguish NAMES from other words
-  * "is this jermaine" = NAME (Script 2)
-  * "is this a pizza" = NOT a name (NO_SEND)
+Rules - VERY SIMPLE:
+1. If message contains WHO words (who, whos, whose, hu, etc.) = Script 1
+2. If message contains "is this" (but not "is this this") = Script 2
+3. If message contains "are you" = Script 2  
+4. If message is JUST a name with "?" (like "john?", "jermaine?") = Script 2
+5. If message contains "is this your new number" = Script 2
+6. Everything else = NO_SEND
+- DO NOT try to validate if the word is a real name
+- Just match the PATTERNS
 - Use EXACT script text when sending
-- Return NO_SEND for anything else
 """
 
 @app.route('/respond', methods=['POST'])
