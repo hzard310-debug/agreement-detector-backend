@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: telegram-bot-sms
+    runtime: python
+    pythonVersion: 3.11
+    buildCommand: pip install --upgrade pip && pip install -r telegram_requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 telegram_bot:app
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        scope: run
+        sync: false
+      - key: TELEGRAM_CHANNEL_ID
+        scope: run
+        sync: false
+      - key: KEEP_ALIVE_KEY
+        scope: run
+        sync: false
+      - key: KEEP_ALIVE_URL
+        scope: run
+        sync: false
+
