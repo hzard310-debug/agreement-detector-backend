@@ -202,10 +202,11 @@ INTERNAL PROCESS (do not include in output):
 - Classify the latest message into ONE of: INAPPROPRIATE | WHO | NAME_ID | WHY | CONTRACT | ALREADY_O2 | NEW_PHONE | WHAT_PHONE | HOW_YOU | GREETING | GENERAL_CONVERSATION | TIME_WASTING | NONE
 - Classification rules (check in this order - read ENTIRE message):
   0. CHECK FOR INAPPROPRIATE CONTENT FIRST (ignore and delete):
-     - If the message contains swear words, profanity, or offensive language → INAPPROPRIATE → NO_SEND (ignore and delete)
-     - If the message is sexual, inappropriate, or contains sexual content → INAPPROPRIATE → NO_SEND (ignore and delete)
-     - If the message is not speaking like a parent would to their child (e.g., flirting, romantic, inappropriate tone) → INAPPROPRIATE → NO_SEND (ignore and delete)
-     - If the message is disrespectful, rude, or not appropriate for a parent-child relationship → INAPPROPRIATE → NO_SEND (ignore and delete)
+     - If the message contains swear words, profanity, or offensive language → INAPPROPRIATE → NO_SEND with reasoning "inappropriate content - contains swear words/profanity - ignore and delete"
+     - If the message is sexual, inappropriate, or contains sexual content (explicit or implicit sexual references, sexual innuendo, sexual requests, etc.) → INAPPROPRIATE → NO_SEND with reasoning "inappropriate content - sexual/inappropriate content - ignore and delete"
+     - If the message is not speaking like a parent would to their child (e.g., flirting, romantic, inappropriate tone, seductive language) → INAPPROPRIATE → NO_SEND with reasoning "inappropriate content - not speaking like a parent to child - ignore and delete"
+     - If the message is disrespectful, rude, or not appropriate for a parent-child relationship → INAPPROPRIATE → NO_SEND with reasoning "inappropriate content - disrespectful/rude - ignore and delete"
+     - CRITICAL: When returning NO_SEND for inappropriate content, the reasoning MUST include the word "inappropriate" or "sexual" so the Android app can detect and delete it
      - These messages should be completely ignored - do not respond, do not engage
   1. CHECK FOR TIME-WASTING/UNCOOPERATIVE BEHAVIOR:
      - If they're being argumentative, hostile, or clearly wasting time → TIME_WASTING → NO_SEND
@@ -365,13 +366,38 @@ def get_response():
                 prefix = 'You' if role == 'you' else 'Them'
                 conversation_lines.append(f"{prefix}: {text}")
 
-            # Walk backwards to find most recent inbound message
+            # Find latest inbound message and check if we're waiting for a reply
+            latest_inbound = ""
+            waiting_for_reply = False
+            
+            # Find the latest "them" message (should be the current incoming message)
             for turn in reversed(parsed_turns):
                 role = (turn.get('role') or '').lower()
                 text = turn.get('text') or ''
                 if role == 'them' and text.strip():
                     latest_inbound = text
                     break
+            
+            # Check if we're waiting for a reply: look at all turns except the current one
+            # If the most recent message (excluding current) was from "you", we're waiting
+            if len(parsed_turns) > 1:
+                # Check turns in reverse order, skipping the current "them" message
+                found_current = False
+                for turn in reversed(parsed_turns):
+                    role = (turn.get('role') or '').lower()
+                    text = turn.get('text') or ''
+                    
+                    if role == 'them' and text.strip() and not found_current:
+                        # This is the current message, skip it
+                        found_current = True
+                        continue
+                    elif found_current:
+                        # We found a message before the current one
+                        if role == 'you' and text.strip():
+                            # The most recent message before the current one was from us
+                            # We're waiting for their reply, don't send another message
+                            waiting_for_reply = True
+                        break
 
             conversation_text = "\n".join(conversation_lines) if conversation_lines else "(No previous conversation history)"
         else:
@@ -379,6 +405,15 @@ def get_response():
 
         if not latest_inbound:
             latest_inbound = "(no inbound message)"
+        
+        # Check if we're waiting for a reply - if so, don't send another message
+        if waiting_for_reply:
+            return jsonify({
+                "action": "NO_SEND",
+                "response": "",
+                "reasoning": "Already sent a message, waiting for reply",
+                "timestamp": datetime.now().isoformat()
+            }), 200
 
         # Build user message for Claude
         latest_msg = latest_inbound
