@@ -28,10 +28,12 @@ Triggers: WHO questions (with typo variants)
 → Script 1
 
 Script 2: "Yes I'll be using this number from now on"
-Triggers: Asking about SPECIFIC NAME or NEW NUMBER
-- "is this jermaine", "is this john", "are you jermaine"
-- "jermaine?", "john?", "is this your new number"
-- Typos: "is dis jermaine", "iz this john", "r u jermaine", "iz ur new number"
+Triggers: Message contains "is this" OR "are you" (with ANY name/word after)
+- EXAMPLES: "is this jermaine", "is this john", "is this james", "is this anything"
+- EXAMPLES: "are you jermaine", "are you john", "are you anyone"
+- EXAMPLES: "jermaine?", "john?", "james?", "is this your new number"
+- Typos also work: "is dis jermaine", "iz this john", "r u jermaine"
+KEY RULE: If message has "is this" or "are you" followed by a word = Script 2
 → Script 2
 
 Script 3: "I'll be using this number from now on because i've got a new plan with O2"
