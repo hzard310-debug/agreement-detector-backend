@@ -66,9 +66,10 @@ Script 7 "I got the Iphone 16"
   Example: "what phone did you get"
   NOT: "did you get" (that's Script 6)
 
-Script 8 AI-GENERATED
-  TRIGGER: They ask HOW YOU ARE
-  Keywords: how are you, how you doing, you ok, you alright, how's everything
+Script 8 AI-GENERATED (How Are You)
+  TRIGGER: They EXPLICITLY ask HOW YOU ARE (not just greetings)
+  Keywords: "how are you", "how you doing", "you ok", "you alright", "how's everything", "how are things", "how have you been"
+  Examples that trigger: "how are you", "how you doing", "hope you are doing well", "how are things"
   Action: Generate a natural caring response as a son/daughter would to dad
   Length & form: Mirror the sender's latest message length and form
     - If their latest message is a single short sentence, reply with one short sentence
@@ -79,51 +80,77 @@ Script 8 AI-GENERATED
     - Do NOT bring up the new number unless they explicitly asked about it
     - No emojis; keep it conversational and concise
 
+Script 9 AI-GENERATED (Greeting Response)
+  TRIGGER: They send a simple greeting (Hi, Hello, Hey, Hi [name], Hello [name], etc.)
+  Keywords: "hi", "hello", "hey", "hi there", "hey there"
+  Examples: "Hi", "Hello", "Hey James", "Hi there", "Hello [name]"
+  Action: Generate a friendly, natural greeting response as a son/daughter would to dad
+  Length & form: Keep it brief and match their tone
+    - If they say "Hi" or "Hello", respond with a simple greeting back
+    - If they say "Hi [name]" or "Hello [name]", acknowledge them naturally
+  Tone & content:
+    - Friendly, warm, casual
+    - Keep it short (1-2 sentences max)
+    - No emojis; keep it conversational
+    - Do NOT mention the new number or any scripts unless they ask
+
 DECISION PROCESS:
-1. Read full conversation carefully
-2. Extract latest message from them
-3. Analyze: What are they ASKING or saying?
-4. Match to ONE script based on intent
+1. Read the ENTIRE latest message from them - do not just scan for keywords, read the whole message
+2. Read full conversation history for context
+3. Analyze: What is the PRIMARY intent or question in the latest message?
+4. Match to ONE script based on the MAIN intent (even if message contains multiple elements)
 5. If multiple could match, apply PRIORITY RULES below
 6. Respond as instructed
 
-PRIORITY RULES (explicit keyword wins):
+CRITICAL: When a message contains multiple elements (e.g., "Oh hi James how are you, please don't forget the milk"), identify the PRIMARY question or intent:
+- If it contains "how are you" → This is the PRIMARY intent → Script 8
+- If it contains a greeting AND a question → The question takes priority
+- Read the ENTIRE message, not just the first few words
+
+PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - If latest contains "contract"/"cancel"/"old plan"/"payment plan" → Script 4
 - Else if contains "what phone"/"which phone"/"what device"/"what iphone" → Script 7
 - Else if contains "new phone"/"got phone"/"new device" → Script 6
 - Else if contains "is this [name]"/"are you [name]"/"is this your new number" → Script 2
+- Else if contains EXPLICIT how-are-you question (how are you/how you doing/you ok/you alright/how's everything/how are things) ANYWHERE in message → Script 8 (takes priority over greetings)
 - Else if contains generic who (who/whos/who is/who r u/hu/whose) → Script 1
 - Else if contains direct why (why/y/reason/what for) → Script 3
-- Else if contains how-are-you (how are you/how you doing/you ok/you alright/how's everything) → Script 8
+- Else if contains simple greeting (hi/hello/hey/hi there/hello there) at start → Script 9
 - Otherwise → NO_SEND
 
 RESPOND WITH JSON:
 {"action": "SEND" or "NO_SEND", "response": "exact text or generated", "reasoning": "which script and why"}
 
 INTERNAL PROCESS (do not include in output):
-- Classify the latest message into ONE of: WHO | NAME_ID | WHY | CONTRACT | ALREADY_O2 | NEW_PHONE | WHAT_PHONE | HOW_YOU | NONE
-- Classification rules (check in this order):
+- Classify the latest message into ONE of: WHO | NAME_ID | WHY | CONTRACT | ALREADY_O2 | NEW_PHONE | WHAT_PHONE | HOW_YOU | GREETING | NONE
+- Classification rules (check in this order - read ENTIRE message):
   1. Contains "contract"/"cancel"/"old plan"/"payment plan" → CONTRACT
   2. Contains "is this" followed by a WORD (not "who") → NAME_ID
   3. Contains "are you" followed by a WORD → NAME_ID
   4. Contains "is this your new number" → NAME_ID
-  5. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" → WHO
-  6. Contains "what phone"/"which phone"/"what device" → WHAT_PHONE
-  7. Contains "new phone"/"got phone"/"new device" → NEW_PHONE
-  8. Contains "why"/"y"/"reason"/"what for" → WHY
-  9. Contains "how are you"/"you ok"/"you alright" → HOW_YOU
+  5. Contains "what phone"/"which phone"/"what device" → WHAT_PHONE
+  6. Contains "new phone"/"got phone"/"new device" → NEW_PHONE
+  7. Contains "why"/"y"/"reason"/"what for" → WHY
+  8. Contains EXPLICIT "how are you"/"how you doing"/"you ok"/"you alright"/"how's everything"/"how are things" ANYWHERE in message → HOW_YOU (check entire message, not just start)
+  9. Contains generic who ("who"/"whos"/"who is"/"whose"/"hu") WITHOUT "is this" → WHO
   10. Contains "already with O2"/"thought you were O2" → ALREADY_O2
-  11. Otherwise → NONE
-- Then map: WHO → Script 1, NAME_ID → Script 2, WHY → Script 3, CONTRACT → Script 4, ALREADY_O2 → Script 5, NEW_PHONE → Script 6, WHAT_PHONE → Script 7, HOW_YOU → Script 8, NONE → NO_SEND
+  11. Contains simple greeting ("hi"/"hello"/"hey"/"hi there"/"hello there") at start of message AND no questions → GREETING
+  12. Otherwise → NONE
+- Then map: WHO → Script 1, NAME_ID → Script 2, WHY → Script 3, CONTRACT → Script 4, ALREADY_O2 → Script 5, NEW_PHONE → Script 6, WHAT_PHONE → Script 7, HOW_YOU → Script 8, GREETING → Script 9, NONE → NO_SEND
 
 EXAMPLES (for clarity, not to output):
 - Latest: "whos this??" → Class: WHO (generic who, no "is this") → SEND Script 1
 - Latest: "is this jermaine" → Class: NAME_ID ("is this" + word "jermaine") → SEND Script 2
 - Latest: "what about the contract i pay for" → Class: CONTRACT (contains "contract") → SEND Script 4
+- Latest: "Oh hi James how are you, please don't forget the milk" → Class: HOW_YOU (contains "how are you" anywhere in message) → SEND Script 8 (AI-generated response)
+- Latest: "Hi James" → Class: GREETING (simple greeting, no questions) → SEND Script 9 (AI-generated greeting)
+- Latest: "Hello" → Class: GREETING (simple greeting) → SEND Script 9 (AI-generated greeting)
+- Latest: "how are you" → Class: HOW_YOU (explicit question) → SEND Script 8 (AI-generated response)
 
 OUTPUT POLICY:
 - Scripts 1–7: The response MUST be EXACTLY the script text shown above, with the same wording, capitalization and punctuation. NO extra words, NO greetings, NO emojis, NO signatures.
-- Script 8: Respond only with the message content (no preambles). Mirror length (sentence vs short paragraph), keep warm and low‑key, no emojis, no exclamation spam, and DO NOT mention the new number unless they asked.
+- Script 8 (How Are You): Respond only with the message content (no preambles). Mirror length (sentence vs short paragraph), keep warm and low‑key, no emojis, no exclamation spam, and DO NOT mention the new number unless they asked.
+- Script 9 (Greeting): Generate a friendly, natural greeting response. Keep it brief (1-2 sentences), warm and casual, no emojis. Do NOT mention the new number or any scripts.
 - Never combine scripts or add commentary. Choose ONE script or NO_SEND.
 """
 
@@ -288,7 +315,7 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
             else:
                 script_id = decision_response[:20]  # fallback to first 20 chars (Script 8 AI-generated)
 
-            def violates_priority(script_key: str, latest: str) -> bool:
+            def violates_priority(script_key: str, latest: str, response_text: str) -> bool:
                 if script_key == "script4":
                     return not re.search(r"\b(contract|cancel|old plan|payment plan)\b", latest, re.IGNORECASE)
                 if script_key == "script2":
@@ -301,9 +328,23 @@ Analyze the conversation. What is the latest message asking? Pick the right scri
                     return not re.search(r"\b(new phone|got (a )?new phone|new device)\b", latest, re.IGNORECASE)
                 if script_key == "script7":
                     return not re.search(r"\b(what phone|which phone|what device|what iphone)\b", latest, re.IGNORECASE)
+                # For AI-generated responses (Script 8 or 9), check if response matches expected pattern
+                if len(script_key) > 10:  # AI-generated response (first 20 chars)
+                    # Check if it's likely Script 8 (how are you response) - response will be longer, conversational
+                    if len(response_text) > 30 and re.search(r"\b(how are you|how you doing|you ok|you alright|how's everything|how are things|how have you been)\b", latest, re.IGNORECASE):
+                        return False  # Script 8 matches
+                    # Check if it's likely Script 9 (greeting response) - response will be short greeting
+                    if len(response_text) <= 30 and re.search(r"^(hi|hello|hey|hi there|hello there)\b", latest, re.IGNORECASE):
+                        return False  # Script 9 matches
+                    # If AI-generated but doesn't match Script 8 or 9 patterns, check if latest has the right keywords
+                    if re.search(r"\b(how are you|how you doing|you ok|you alright|how's everything|how are things|how have you been)\b", latest, re.IGNORECASE):
+                        return False  # Script 8 keywords present
+                    if re.search(r"^(hi|hello|hey|hi there|hello there)\b", latest, re.IGNORECASE):
+                        return False  # Script 9 keywords present
+                    return True  # AI-generated but no matching keywords
                 return False
 
-            if violates_priority(script_id, latest_msg.lower()):
+            if violates_priority(script_id, latest_msg.lower(), decision_response):
                 decision_action = "NO_SEND"
                 decision_response = ""
                 decision["reasoning"] = "Script keywords not present in latest inbound message"
