@@ -763,7 +763,16 @@ def get_response():
                 "i don't have a son", "i don't have a daughter", "i don't have a child",
                 "who is this really", "who are you really", "this is a scam", "this is scam",
                 "scammer", "scam", "fraud", "fake", "liar", "lying", "you're lying",
-                "you are lying", "this is fake", "not my kid", "not my kids"
+                "you are lying", "this is fake", "not my kid", "not my kids",
+                "go away im not dad", "go away im not ur dad", "go away im not your dad",
+                "go away i'm not dad", "go away i'm not ur dad", "go away i'm not your dad",
+                "im not dad", "i'm not dad", "im not ur dad", "i'm not ur dad",
+                "im not your dad", "i'm not your dad", "not dad", "not ur dad", "not your dad",
+                "go away", "leave me alone", "stop messaging", "stop texting",
+                "wrong son", "wrong daughter", "wrong child", "not my son", "not my daughter",
+                "my children are estranged", "children are estranged", "estranged for many years",
+                "forgotten their names", "i've forgotten their names", "i have forgotten their names",
+                "dont think we are", "don't think we are", "dont think you are", "don't think you are"
             ]
             is_disbelief = any(keyword in latest_lower for keyword in disbelief_keywords)
             
@@ -775,10 +784,12 @@ def get_response():
                     "timestamp": datetime.now().isoformat()
                 }), 200
             
-            # Check for rude/inappropriate messages
+            # Check for rude/inappropriate messages (enhanced with more profanity)
             rude_keywords = [
                 "fuck", "fuck off", "fuck you", "fucking", "shit", "damn", "bitch", "bastard",
-                "piss off", "piss", "crap", "hell", "asshole"
+                "piss off", "piss", "crap", "hell", "asshole", "dick", "cock", "pussy",
+                "cunt", "wanker", "twat", "tosser", "bellend", "arse", "arsehole",
+                "scamming", "scammer", "stupid scamming", "get fucked", "go get fucked"
             ]
             is_rude = any(keyword in latest_lower for keyword in rude_keywords)
             
@@ -786,18 +797,42 @@ def get_response():
                 return jsonify({
                     "action": "NO_SEND",
                     "response": "",
-                    "reasoning": "Rude/inappropriate message, ignoring",
+                    "reasoning": "inappropriate content - contains swear words/profanity - ignore and delete",
                     "timestamp": datetime.now().isoformat()
                 }), 200
             
-            # Skip messages that are just punctuation (like "?")
+            # Check if message is just punctuation (like "???") - if so, look at previous message instead
             if re.match(r'^[?!.,;:]+$', latest_msg.strip()):
-                return jsonify({
-                    "action": "NO_SEND",
-                    "response": "",
-                    "reasoning": "Message is just punctuation, ignoring",
-                    "timestamp": datetime.now().isoformat()
-                }), 200
+                # Find the previous message from "them" before this punctuation-only message
+                previous_message = None
+                found_punctuation = False
+                for turn in reversed(parsed_turns):
+                    role = (turn.get('role') or '').lower()
+                    text = turn.get('text') or ''
+                    if role == 'them' and text.strip():
+                        if found_punctuation:
+                            # This is the message before the punctuation
+                            previous_message = text
+                            break
+                        if text.strip() == latest_msg.strip():
+                            # Found the punctuation message
+                            found_punctuation = True
+                
+                if previous_message:
+                    # Use the previous message instead
+                    latest_inbound = previous_message
+                    latest_msg = previous_message
+                    latest_lower = previous_message.lower()
+                    latest_norm = re.sub(r'[^a-z0-9 ]+', '', previous_message.lower())
+                    print(f"DEBUG: Punctuation-only message detected, using previous message instead: '{previous_message}'")
+                else:
+                    # No previous message found, ignore this punctuation message
+                    return jsonify({
+                        "action": "NO_SEND",
+                        "response": "",
+                        "reasoning": "Message is just punctuation with no previous message, ignoring",
+                        "timestamp": datetime.now().isoformat()
+                    }), 200
             
             # Check for O2 call alert messages - Script 18
             o2_call_alert_keywords = [
@@ -927,6 +962,18 @@ def get_response():
         script12_keywords = ["sure", "ok", "okay", "yes", "of course", "what is it", "what do you need", "what's the favour", "what favour", "tell me", "go ahead", "absolutely", "yeah", "yep", "yup", "what can i do", "how can i help", "what do you need help with", "what do you need help", "what help", "anything", "what's up", "what's the matter", "what's wrong", "what's going on", "what's happening"]
         latest_lower = latest_msg.lower() if latest_msg else ""
         contains_agreement_keyword = any(keyword in latest_lower for keyword in script12_keywords)
+        
+        # Check if they said "no" to the favour request - ignore it
+        if previous_was_favour_request:
+            no_keywords = ["no", "nope", "sorry no", "sorry, no", "can't", "cannot", "cant", "unable", "not able", "won't", "wont", "will not", "don't want", "dont want", "not interested", "not gonna", "not going to", "refuse", "decline"]
+            is_no_response = any(keyword in latest_lower for keyword in no_keywords)
+            if is_no_response:
+                return jsonify({
+                    "action": "NO_SEND",
+                    "response": "",
+                    "reasoning": "Person said no to the favour request, ignoring",
+                    "timestamp": datetime.now().isoformat()
+                }), 200
         
         # If both conditions are met, use Script 12 directly
         if previous_was_favour_request and contains_agreement_keyword:
