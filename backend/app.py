@@ -581,6 +581,7 @@ def generate_natural_fallback(message, has_question_mark, is_statement):
         # Default natural response
         return "Okay thanks"
 
+@app.route('/respond', methods=['POST'])
 def get_response():
     """
     Receives conversation context and script, decides when to send it
