@@ -839,6 +839,7 @@ def get_response():
                 "fuck", "fuk", "fuckk", "fukc", "fuck off", "fuk off", "fuck of", "fuk of", "fuckoff", "fukoff",
                 "fuck you", "fuk you", "fuck u", "fuk u", "fucking", "fuking", "fuckin", "fukin", "fucked", "fuked",
                 "fuck off!", "fuk off!", "fuck of!", "fuk of!",
+                "shut the fuck up", "shut the fuk up", "shut up", "shutup", "shut the fuck", "shut the fuk",
                 "shit", "shitt", "shyt", "sht", "damn", "dam", "damm", "bitch", "bich", "bitchh", "bastard", "bastrd",
                 "piss off", "pis off", "piss of", "pis of", "piss", "pis", "crap", "crap", "hell", "hel", "hel",
                 "asshole", "ashole", "asshol", "ashol", "dick", "dik", "dikk", "cock", "cok", "cokk", "pussy", "pusy", "puss",
@@ -858,7 +859,10 @@ def get_response():
                 "stupid", "stupd", "stupid", "idiot", "idot", "idiot", "moron", "moron", "moron", "dumb", "dum", "dumb",
                 "dumbass", "dumbas", "dumbass", "retard", "retrd", "retard",
                 "manky", "manky", "junky", "junkie", "junky", "whore", "whor", "whore", "hore", "who should still be in prison",
-                "should still be in prison", "should be in prison", "still be in prison", "in prison", "prison"
+                "should still be in prison", "should be in prison", "still be in prison", "in prison", "prison",
+                "you're adopted", "your adopted", "youre adopted", "ur adopted", "you are adopted", "you ar adopted",
+                "you're also gay", "your also gay", "youre also gay", "ur also gay", "you are also gay", "you ar also gay",
+                "you're gay", "your gay", "youre gay", "ur gay", "you are gay", "you ar gay"
             ]
             # Also check for patterns like "fuck off" or "scammer" as standalone phrases (with typos)
             is_rude = any(keyword in latest_lower for keyword in rude_keywords) or \
