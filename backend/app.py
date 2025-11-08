@@ -786,6 +786,7 @@ def get_response():
                 "im not your dad", "i'm not your dad", "im not youre dad", "i'm not youre dad",
                 "im not your dad!", "i'm not your dad!", "im not youre dad!", "i'm not youre dad!",
                 "not dad", "not ur dad", "not your dad", "not youre dad", "not your dad!", "not youre dad!",
+                "not your dad", "not youre dad", "not ur dad", "not your dad", "not youre dad",
                 "go away", "go awy", "goa way", "leave me alone", "leave me alon", "leav me alone",
                 "stop messaging", "stop messagng", "stop texting", "stop txting", "stop txtng",
                 "wrong son", "rong son", "wrong sn", "wrong daughter", "rong daughter", "wrong daugter",
@@ -801,11 +802,12 @@ def get_response():
                 "i'm not your", "im not your", "im not youre", "i am not your", "i am not youre",
                 "i'm not ur", "im not ur", "i'm not youre", "im not youre"
             ]
-            # Also check for patterns like "im not your dad" or "i'm not your dad" (with or without punctuation)
+            # Also check for patterns like "im not your dad" or "i'm not your dad" or "not your dad" (with or without punctuation)
             is_disbelief = any(keyword in latest_lower for keyword in disbelief_keywords) or \
                           ("not" in latest_lower and "your dad" in latest_lower) or \
                           ("not" in latest_lower and "ur dad" in latest_lower) or \
-                          ("not" in latest_lower and "your" in latest_lower and ("dad" in latest_lower or "father" in latest_lower or "parent" in latest_lower))
+                          ("not" in latest_lower and "your" in latest_lower and ("dad" in latest_lower or "father" in latest_lower or "parent" in latest_lower)) or \
+                          (latest_lower.strip() == "not your dad" or latest_lower.strip() == "not ur dad" or latest_lower.strip() == "not youre dad")
             
             if is_disbelief:
                 return jsonify({
