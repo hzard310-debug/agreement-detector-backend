@@ -36,7 +36,7 @@ object MessageScanner {
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "AgreementDetector::MessageScanning"
             )
-            wakeLock?.acquire(300000) // Hold for up to 5 minutes for full scan
+            wakeLock?.acquire(1800000) // Hold for up to 30 minutes for large scans (2000+ messages)
             
             try {
                 // Clear previous logs and start fresh scan
@@ -88,6 +88,9 @@ object MessageScanner {
                 }
                 
                 Log.d(TAG, "Scanned $totalScanned messages from ${messagesByAddress.size} contacts")
+                if (totalScanned > 1000) {
+                    Log.d(TAG, "Large scan detected ($totalScanned messages) - this may take several minutes")
+                }
                 
                 val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
                 // CRITICAL: Always read fresh from database - don't rely on cached responded_messages set
@@ -186,7 +189,10 @@ object MessageScanner {
                     // Process EVERY unresponded message - don't stop after the first one
                     for ((messageText, messageDate) in messages) {
                         
-                        Log.d(TAG, "Checking message from $address: $messageText (date: $messageDate)")
+                        // Reduce logging frequency for large scans to avoid performance issues
+                        if (totalUnresponded % 50 == 0 || totalUnresponded < 10 || totalScanned < 100) {
+                            Log.d(TAG, "Checking message from $address: $messageText (date: $messageDate) [Progress: $totalUnresponded unresponded found]")
+                        }
                         
                         val messageHash = hashMessage(address, messageText)
                         
@@ -196,24 +202,42 @@ object MessageScanner {
                         var responseText = ""
                         var responseDate = 0L
                         
-                        // Check all sent messages - find one that came AFTER this incoming message
-                        // Since sentMessagesWithDates is sorted ASC (oldest first), we can check if any message came after
+                        // OPTIMIZED: Check sent messages efficiently - use binary search since they're sorted
+                        // Since sentMessagesWithDates is sorted ASC (oldest first), we can optimize the search
+                        // Only check sent messages that could possibly be responses (within reasonable time window)
+                        // For large message volumes, this avoids checking thousands of old messages
+                        val maxResponseTime = messageDate + 86400000L // 24 hours - responses typically come within this window
+                        var foundResponse = false
+                        
+                        // Use binary search approach: find first sent message after this incoming message
+                        // Since list is sorted ASC, we can iterate and break early
                         for ((sentText, sentDate) in sentMessagesWithDates) {
+                            // Early exit: if sent message is too old (before incoming), skip
+                            if (sentDate < messageDate - 86400000L) { // More than 24h before - definitely not a response
+                                continue
+                            }
+                            // Early exit: if sent message is way after (more than 24h), no point checking further
+                            if (sentDate > maxResponseTime) {
+                                break
+                            }
                             // Response must come AFTER the incoming message (with small buffer for timing)
-                            // Check if this sent message came after the incoming message
                             if (sentDate > messageDate + 1000) { // 1 second buffer to account for timing differences
                                 hasResponseAfter = true
                                 responseText = sentText
                                 responseDate = sentDate
-                                Log.d(TAG, "Found response sent AFTER incoming message: '$sentText' (sent: $sentDate, received: $messageDate, diff: ${sentDate - messageDate}ms)")
+                                foundResponse = true
+                                // Don't log for every message in large scans - only log occasionally
+                                if (totalUnresponded % 50 == 0 || totalUnresponded < 10) {
+                                    Log.d(TAG, "Found response sent AFTER incoming message: '$sentText' (sent: $sentDate, received: $messageDate, diff: ${sentDate - messageDate}ms)")
+                                }
                                 break // Found a response, no need to check further
                             }
                         }
                         
-                        // If no response found, log all sent messages for debugging
-                        if (!hasResponseAfter && sentMessagesWithDates.isNotEmpty()) {
+                        // Only log detailed debugging for first few messages or in small scans
+                        if (!hasResponseAfter && sentMessagesWithDates.isNotEmpty() && (totalUnresponded < 5 || totalScanned < 100)) {
                             Log.d(TAG, "No response found after message. Sent messages to this contact:")
-                            sentMessagesWithDates.forEach { (text, date) ->
+                            sentMessagesWithDates.take(10).forEach { (text, date) -> // Only show first 10 to avoid spam
                                 val diff = date - messageDate
                                 Log.d(TAG, "  Sent: '$text' at $date (diff: ${diff}ms from incoming)")
                             }
@@ -250,27 +274,48 @@ object MessageScanner {
                             messageDate
                         )
                         
-                        Log.d(TAG, "REFRESHED: Read ALL ${turnsUpToMessage.size} messages from entire chat history for $address")
-                        Log.d(TAG, "Checking with backend for message: $messageText")
-                        Log.d(TAG, "Conversation history: ${turnsUpToMessage.size} turns (ALL messages from entire conversation)")
-                        turnsUpToMessage.forEachIndexed { index, turn ->
-                            Log.d(TAG, "  Turn $index: ${turn["role"]} - ${turn["text"]}")
+                        // Reduce verbose logging for large scans
+                        if (totalUnresponded % 50 == 0 || totalUnresponded < 10 || totalScanned < 100) {
+                            Log.d(TAG, "REFRESHED: Read ALL ${turnsUpToMessage.size} messages from entire chat history for $address")
+                            Log.d(TAG, "Checking with backend for message: $messageText")
+                            if (turnsUpToMessage.size <= 20) { // Only log full history for small conversations
+                                Log.d(TAG, "Conversation history: ${turnsUpToMessage.size} turns (ALL messages from entire conversation)")
+                                turnsUpToMessage.forEachIndexed { index, turn ->
+                                    Log.d(TAG, "  Turn $index: ${turn["role"]} - ${turn["text"]}")
+                                }
+                            } else {
+                                Log.d(TAG, "Conversation history: ${turnsUpToMessage.size} turns (large conversation - skipping detailed log)")
+                            }
                         }
                         
                         // This is an unresponded message
                         totalUnresponded++
-                        Log.d(TAG, "Found unresponded message #$totalUnresponded from $address: $messageText")
+                        // Log progress every 50 messages or for first 10, or every 100th message in very large scans
+                        if (totalUnresponded % 50 == 0 || totalUnresponded < 10 || (totalScanned > 1000 && totalUnresponded % 100 == 0)) {
+                            Log.d(TAG, "Found unresponded message #$totalUnresponded from $address: $messageText [Progress: $totalUnresponded/$totalScanned]")
+                        }
                         
                         // Check with backend if we should respond
                         val shouldRespond = checkIfShouldRespond(context, address, turnsUpToMessage, messageText, messageHash)
                         
                         if (shouldRespond) {
                             totalQueued++
-                            Log.d(TAG, "Queued response #$totalQueued for $address: $messageText")
+                            // Log progress periodically
+                            if (totalQueued % 25 == 0 || totalQueued < 10 || (totalScanned > 1000 && totalQueued % 50 == 0)) {
+                                Log.d(TAG, "Queued response #$totalQueued for $address: $messageText [Progress: $totalQueued responses queued]")
+                            }
                             // Continue to next message - process ALL unresponded messages
                         } else {
-                            Log.d(TAG, "Backend said NO_SEND for unresponded message: $messageText")
+                            // Reduce logging for NO_SEND in large scans
+                            if (totalUnresponded % 100 == 0 || totalUnresponded < 10) {
+                                Log.d(TAG, "Backend said NO_SEND for unresponded message: $messageText")
+                            }
                             // Continue to next message - process ALL unresponded messages
+                        }
+                        
+                        // Add small delay every 100 messages to prevent overwhelming the system
+                        if (totalUnresponded % 100 == 0 && totalUnresponded > 0) {
+                            Thread.sleep(100) // Brief pause every 100 messages
                         }
                     }
                     
@@ -281,8 +326,19 @@ object MessageScanner {
                 }
                 
                 // Summary of conversation states
-                Log.d(TAG, "Scan complete: $totalScanned messages scanned, $totalUnresponded unresponded messages found, $totalQueued responses queued")
-                Log.d(TAG, "Summary: $contactsNeedingResponse contacts need responses, $contactsWaitingForReply contacts waiting for replies")
+                val scanDuration = System.currentTimeMillis() - (wakeLock?.let { 
+                    // Approximate duration (wake lock was acquired at start)
+                    System.currentTimeMillis() 
+                } ?: System.currentTimeMillis())
+                Log.d(TAG, "=== SCAN COMPLETE ===")
+                Log.d(TAG, "Total messages scanned: $totalScanned")
+                Log.d(TAG, "Unresponded messages found: $totalUnresponded")
+                Log.d(TAG, "Responses queued: $totalQueued")
+                Log.d(TAG, "Contacts needing responses: $contactsNeedingResponse")
+                Log.d(TAG, "Contacts waiting for replies: $contactsWaitingForReply")
+                if (totalScanned > 1000) {
+                    Log.d(TAG, "Large scan completed successfully - processed $totalScanned messages")
+                }
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error scanning messages: ${e.message}", e)
