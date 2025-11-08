@@ -834,6 +834,21 @@ def get_response():
                         "timestamp": datetime.now().isoformat()
                     }), 200
             
+            # Check if message is just a single word with punctuation (like "What.", "What?", "Why.", "Why?")
+            # These are uninformative and should be ignored
+            latest_stripped = latest_msg.strip()
+            # Remove punctuation from the end
+            latest_no_punct = re.sub(r'[?!.,;:]+$', '', latest_stripped).strip()
+            # Check if it's a single word (no spaces) and is a common question word
+            single_word_questions = ["what", "why", "how", "when", "where", "who", "which", "whom", "whose"]
+            if latest_no_punct and ' ' not in latest_no_punct and latest_no_punct.lower() in single_word_questions:
+                return jsonify({
+                    "action": "NO_SEND",
+                    "response": "",
+                    "reasoning": "Message is just a single-word question without context, ignoring",
+                    "timestamp": datetime.now().isoformat()
+                }), 200
+            
             # Check for O2 call alert messages - Script 18
             o2_call_alert_keywords = [
                 "missed a call", "call alert", "you missed a call from", "missed a call from me",
