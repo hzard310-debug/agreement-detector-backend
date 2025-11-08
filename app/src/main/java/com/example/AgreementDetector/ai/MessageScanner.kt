@@ -95,14 +95,8 @@ object MessageScanner {
                 Log.d(TAG, "Clearing previous scan state and reading fresh conversation data")
                 Log.d(TAG, "Background processing: Wake lock acquired for scanning (works even when screen is off)")
                 
-                // ALL message scanning requires AI - verify AI is enabled
-                val settings = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-                if (!settings.getBoolean("ai_response_enabled", false)) {
-                    Log.w(TAG, "AI response not enabled - skipping scan. ALL message reading requires AI.")
-                    return@Thread
-                }
-                
-                Log.d(TAG, "AI enabled - scanning messages through AI backend")
+                // REMOVED: AI enabled check - always scan and send messages
+                Log.d(TAG, "Scanning messages and sending responses automatically")
                 notifyStatus("📱 Reading messages from device...")
                 
                 val inbox = Telephony.Sms.Inbox.CONTENT_URI

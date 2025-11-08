@@ -63,31 +63,22 @@ class MainActivity : AppCompatActivity() {
         requestPermissionsIfNeeded()
         requestBatteryOptimizationExemption()
         
-        // Auto-scan messages if AI mode is enabled
-        val settings = getSharedPreferences("settings", MODE_PRIVATE)
-        if (settings.getBoolean("ai_response_enabled", false)) {
-            // Start foreground service to keep app alive when screen is locked
-            SmsProcessingService.start(this)
-            // Delay scan slightly to let app initialize
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                com.example.agreementdetector.ai.MessageScanner.scanAllMessages(this)
-            }, 2000)
-        } else {
-            // Stop service if AI is disabled
-            SmsProcessingService.stop(this)
-        }
+        // REMOVED: AI enabled check - always start service and scan messages automatically
+        // Start foreground service to keep app alive when screen is locked
+        SmsProcessingService.start(this)
+        // Delay scan slightly to let app initialize
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            com.example.agreementdetector.ai.MessageScanner.scanAllMessages(this)
+        }, 2000)
     }
     
     override fun onResume() {
         super.onResume()
-        // Scan messages when app comes to foreground if AI is enabled
-        val settings = getSharedPreferences("settings", MODE_PRIVATE)
-        if (settings.getBoolean("ai_response_enabled", false)) {
-            // Delay slightly to avoid scanning too frequently
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                com.example.agreementdetector.ai.MessageScanner.scanAllMessages(this)
-            }, 1000)
-        }
+        // REMOVED: AI enabled check - always scan messages automatically
+        // Delay slightly to avoid scanning too frequently
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            com.example.agreementdetector.ai.MessageScanner.scanAllMessages(this)
+        }, 1000)
     }
 
     private fun requestPermissionsIfNeeded() {
@@ -111,10 +102,10 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                         data = Uri.parse("package:$packageName")
-                    }
-                    startActivity(intent)
+                                            }
+                                            startActivity(intent)
                     Toast.makeText(this, "Please allow battery optimization exemption for background SMS processing", Toast.LENGTH_LONG).show()
-                } catch (e: Exception) {
+            } catch (e: Exception) {
                     // Fallback: open battery optimization settings
                     try {
                         val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)

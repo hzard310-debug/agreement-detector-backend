@@ -75,17 +75,8 @@ class SmsReceiver : BroadcastReceiver() {
                 android.util.Log.e("SmsReceiver", "Toast error", e)
             }
 
-            // ALL message processing requires AI - check if AI is enabled
-            val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            val aiEnabled = prefs.getBoolean("ai_response_enabled", false)
-            android.util.Log.i("SmsReceiver", "[CHECK] AI enabled: $aiEnabled")
-            
-            // Only process messages if AI is enabled - ALL messages must go through AI backend
-            if (!aiEnabled) {
-                android.util.Log.w("SmsReceiver", "AI not enabled - ignoring message. Enable AI to process messages.")
-                pendingResult.finish()
-                return
-            }
+            // REMOVED: AI enabled check - always process messages automatically
+            android.util.Log.i("SmsReceiver", "[OK] Processing message automatically")
             
             // CRITICAL: Pass SMS to foreground service for processing (service will handle everything)
             // This ensures processing continues even when screen is locked
@@ -113,7 +104,7 @@ class SmsReceiver : BroadcastReceiver() {
             wakeLock?.acquire(60000) // Hold for up to 60 seconds
                 
             Log.d("SmsReceiver", "FALLBACK: Processing SMS in receiver (service failed to start)")
-            Thread {
+                Thread {
                     try {
                         // Get FULL conversation history - collect ALL messages (no limit)
                         // This ensures AI reads the complete chat context - ALL messages from entire conversation
