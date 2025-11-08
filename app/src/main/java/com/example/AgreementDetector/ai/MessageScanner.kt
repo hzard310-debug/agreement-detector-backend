@@ -1,8 +1,12 @@
 package com.example.agreementdetector.ai
 
 import android.content.Context
+import android.content.Intent
+import android.app.PendingIntent
 import android.os.PowerManager
 import android.provider.Telephony
+import android.telephony.SmsManager
+import android.telephony.SubscriptionManager
 import android.util.Log
 import com.example.agreementdetector.AutoSendQueue
 import com.example.agreementdetector.SmsReceiver
@@ -13,20 +17,64 @@ import okhttp3.RequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
+import java.util.concurrent.Executors
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 
 object MessageScanner {
     private const val TAG = "MessageScanner"
     @Volatile private var isScanning = false
+    @Volatile private var pendingRescan = false
     private val scanLock = Any()
     
-    fun scanAllMessages(context: Context) {
+    // Status callback for UI updates
+    interface StatusListener {
+        fun onStatusUpdate(status: String)
+        fun onQueueCountUpdate(count: Int)
+    }
+    
+    private val statusListeners = mutableSetOf<StatusListener>()
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    
+    fun addStatusListener(listener: StatusListener) {
+        statusListeners.add(listener)
+    }
+    
+    fun removeStatusListener(listener: StatusListener) {
+        statusListeners.remove(listener)
+    }
+    
+    private fun notifyStatus(status: String) {
+        handler.post {
+            statusListeners.forEach { it.onStatusUpdate(status) }
+        }
+    }
+    
+    private fun notifyQueueCount(count: Int) {
+        handler.post {
+            statusListeners.forEach { it.onQueueCountUpdate(count) }
+        }
+    }
+    
+    // Data class for unresponded messages to process in parallel
+    private data class UnrespondedMessage(
+        val address: String,
+        val messageText: String,
+        val messageHash: String,
+        val conversationHistory: List<Map<String, String>>,
+        val messageDate: Long = System.currentTimeMillis() // Store message date for sorting
+    )
+    
+    fun scanAllMessages(context: Context, sinceTimestamp: Long? = null) {
         // Prevent multiple scans from running simultaneously
         synchronized(scanLock) {
             if (isScanning) {
-                Log.d(TAG, "Scan already in progress, skipping")
+                Log.d(TAG, "Scan already in progress, queuing rescan for after current scan completes")
+                pendingRescan = true
                 return
             }
             isScanning = true
+            pendingRescan = false // Clear any pending rescan since we're starting a new one
         }
         
         Thread {
@@ -53,28 +101,49 @@ object MessageScanner {
                 }
                 
                 Log.d(TAG, "AI enabled - scanning messages through AI backend")
+                notifyStatus("📱 Reading messages from device...")
                 
                 val inbox = Telephony.Sms.Inbox.CONTENT_URI
                 var totalScanned = 0
                 var totalUnresponded = 0
-                var totalQueued = 0
+                val totalQueued = AtomicInteger(0)
                 
-                // Get all inbox messages grouped by address
+                // Scan messages - if sinceTimestamp is provided, only check new messages after that time
+                // Otherwise, scan messages from the last 1 week for better performance
+                // Collect all unresponded messages first (fast filtering, no backend calls)
+                val unrespondedMessagesToProcess = mutableListOf<UnrespondedMessage>()
+                
+                // Determine the date filter
+                val minDate = if (sinceTimestamp != null) {
+                    Log.d(TAG, "Scanning only NEW messages received after ${sinceTimestamp} (since messages were sent)")
+                    sinceTimestamp
+                } else {
+                    // Calculate date 1 week ago for full scan
+                    val oneWeekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
+                    Log.d(TAG, "Full scan: Reading messages from last week")
+                    oneWeekAgo
+                }
+                
+                // Get inbox messages grouped by address
                 val messagesByAddress = mutableMapOf<String, MutableList<Pair<String, Long>>>()
                 
                 try {
+                    // Read inbox messages (filtered by date)
                     context.contentResolver.query(
                         inbox,
                         arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
-                        null,
-                        null,
+                        "${Telephony.Sms.DATE} >= ?", // Date filter
+                        arrayOf(minDate.toString()),
                         "${Telephony.Sms.DATE} DESC"
                     )?.use { cursor ->
+                        val scanType = if (sinceTimestamp != null) "NEW messages" else "last week"
+                        Log.d(TAG, "Reading inbox messages ($scanType) (total: ${cursor.count})...")
                         while (cursor.moveToNext()) {
                             val address = cursor.getString(0) ?: continue
                             val body = cursor.getString(1) ?: continue
                             val date = cursor.getLong(2)
                             
+                            // Add message
                             if (!messagesByAddress.containsKey(address)) {
                                 messagesByAddress[address] = mutableListOf()
                             }
@@ -83,239 +152,282 @@ object MessageScanner {
                         }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error reading messages: ${e.message}", e)
+                    Log.e(TAG, "Error reading inbox messages: ${e.message}", e)
                     return@Thread
                 }
                 
-                Log.d(TAG, "Scanned $totalScanned messages from ${messagesByAddress.size} contacts")
-                if (totalScanned > 1000) {
-                    Log.d(TAG, "Large scan detected ($totalScanned messages) - this may take several minutes")
-                }
+                val scanType = if (sinceTimestamp != null) "NEW messages" else "last week"
+                Log.i(TAG, "✓✓✓ Scanned $totalScanned inbox messages ($scanType) from ${messagesByAddress.size} contacts")
                 
                 val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
                 // CRITICAL: Always read fresh from database - don't rely on cached responded_messages set
                 // We'll verify each message against the actual SMS database
                 val respondedMessages = mutableSetOf<String>() // Start fresh - will verify against database
                 
-                // CRITICAL: Read ALL sent messages ONCE before the loop to avoid opening multiple cursors
-                // Group sent messages by address for efficient lookup
+                // Read sent messages for conversation history (always get full history, not just recent)
+                // We need full conversation context even when scanning for new messages
+                Log.d(TAG, "Reading sent messages for conversation history...")
                 val sentMessagesByAddress = mutableMapOf<String, MutableList<Pair<String, Long>>>() // address -> list of (text, date)
+                var totalSentScanned = 0
+                
+                // For conversation history, always get messages from last week (full context)
+                // The sinceTimestamp filter is only used for inbox messages (to find new messages to respond to)
+                val conversationHistoryMinDate = if (sinceTimestamp != null) {
+                    // When scanning for new messages, still get full conversation history from last week
+                    System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
+                } else {
+                    minDate
+                }
+                
                 try {
+                    // Query sent messages (full conversation history from last week)
                     context.contentResolver.query(
                         Telephony.Sms.Sent.CONTENT_URI,
                         arrayOf(Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.ADDRESS),
-                        null,
-                        null,
+                        "${Telephony.Sms.DATE} >= ?", // Date filter - full conversation history
+                        arrayOf(conversationHistoryMinDate.toString()),
                         "${Telephony.Sms.DATE} ASC" // Oldest first for chronological checking
                     )?.use { cursor ->
+                        Log.d(TAG, "Reading sent messages ($scanType) (total: ${cursor.count})...")
                         while (cursor.moveToNext()) {
                             val sentBody = cursor.getString(0) ?: continue
                             val sentDate = cursor.getLong(1)
                             val sentAddress = cursor.getString(2) ?: continue
                             
-                            // Group by address (normalize for comparison)
-                            var matchedAddress: String? = null
-                            for (inboxAddress in messagesByAddress.keys) {
-                                if (android.telephony.PhoneNumberUtils.compare(context, inboxAddress, sentAddress)) {
-                                    matchedAddress = inboxAddress
+                            // Normalize address for grouping (use first occurrence as canonical)
+                            var canonicalAddress: String? = null
+                            
+                            // Check if this address matches any existing address (inbox or sent)
+                            for (existingAddress in messagesByAddress.keys) {
+                                if (android.telephony.PhoneNumberUtils.compare(context, existingAddress, sentAddress)) {
+                                    canonicalAddress = existingAddress
                                     break
                                 }
                             }
                             
-                            if (matchedAddress != null) {
-                                if (!sentMessagesByAddress.containsKey(matchedAddress)) {
-                                    sentMessagesByAddress[matchedAddress] = mutableListOf()
+                            // If no match found in inbox, check sent addresses
+                            if (canonicalAddress == null) {
+                                for (existingAddress in sentMessagesByAddress.keys) {
+                                    if (android.telephony.PhoneNumberUtils.compare(context, existingAddress, sentAddress)) {
+                                        canonicalAddress = existingAddress
+                                        break
+                                    }
                                 }
-                                sentMessagesByAddress[matchedAddress]?.add(sentBody to sentDate)
                             }
+                            
+                            // Use canonical address or create new entry
+                            val addressToUse = canonicalAddress ?: sentAddress
+                            
+                            if (!sentMessagesByAddress.containsKey(addressToUse)) {
+                                sentMessagesByAddress[addressToUse] = mutableListOf()
+                            }
+                            sentMessagesByAddress[addressToUse]?.add(sentBody to sentDate)
+                            totalSentScanned++
                         }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error reading sent messages: ${e.message}", e)
                 }
                 
-                Log.d(TAG, "Loaded sent messages for ${sentMessagesByAddress.size} contacts")
+                Log.i(TAG, "✓✓✓ Scanned $totalSentScanned sent messages ($scanType) from ${sentMessagesByAddress.size} contacts")
+                
+                // OPTIMIZATION: Only process contacts with inbox messages (they need responses)
+                // Skip contacts where we only sent messages (we're waiting for their reply)
+                val contactsToProcess = mutableSetOf<String>()
+                contactsToProcess.addAll(messagesByAddress.keys)
+                
+                // Normalize addresses efficiently - only for contacts we need to process
+                val normalizedAddresses = mutableMapOf<String, String>() // normalized -> canonical
+                for (address in contactsToProcess) {
+                    var found = false
+                    for (existing in normalizedAddresses.keys) {
+                        if (android.telephony.PhoneNumberUtils.compare(context, existing, address)) {
+                            found = true
+                            break
+                        }
+                    }
+                    if (!found) {
+                        normalizedAddresses[address] = address
+                    }
+                }
+                
+                val totalContacts = normalizedAddresses.size
+                val totalMessages = totalScanned + totalSentScanned
+                
+                Log.d(TAG, "=== SCANNING ALL MESSAGES: $totalMessages total messages (ALL messages) from $totalContacts contacts ===")
                 
                 // Track conversation states
                 var contactsWaitingForReply = 0
                 var contactsNeedingResponse = 0
+                var contactsProcessed = 0
                 
-                // Process each contact's messages - scan ALL messages, not just the latest
-                for ((address, messages) in messagesByAddress) {
-                    Log.d(TAG, "Processing contact $address with ${messages.size} messages")
+                // Process EVERY contact's conversation - scan ALL conversations on the phone
+                // Use normalized addresses to ensure we process every unique conversation
+                for (canonicalAddress in normalizedAddresses.keys) {
+                    // Get inbox messages for this contact (may be empty if only sent messages)
+                    val messages = messagesByAddress[canonicalAddress] ?: mutableListOf()
                     
-                    // Get sent messages for this contact (already loaded and grouped)
-                    val sentMessagesWithDates = sentMessagesByAddress[address] ?: mutableListOf()
+                    // Get sent messages for this contact (may be empty if only inbox messages)
+                    val sentMessagesWithDates = sentMessagesByAddress[canonicalAddress] ?: mutableListOf()
                     
-                    Log.d(TAG, "Found ${sentMessagesWithDates.size} sent messages to $address in SMS database")
+                    Log.d(TAG, "Processing contact $canonicalAddress: ${messages.size} inbox messages, ${sentMessagesWithDates.size} sent messages")
                     
-                    // CRITICAL: Determine conversation state - who sent the last message?
-                    // Read ALL messages (inbox + sent) to determine the last message in the conversation
-                    val allMessagesWithDates = mutableListOf<Triple<Long, String, String>>() // date, role, text
+                    // OPTIMIZATION: Check last message FIRST to instantly skip conversations where we're waiting for a reply
+                    // This makes scanning instant for conversations that don't need responses
                     
-                    // Add inbox messages (from them)
-                    for ((messageText, messageDate) in messages) {
-                        allMessagesWithDates.add(Triple(messageDate, "them", messageText))
-                    }
-                    
-                    // Add sent messages (from you)
-                    for ((sentText, sentDate) in sentMessagesWithDates) {
-                        allMessagesWithDates.add(Triple(sentDate, "you", sentText))
-                    }
-                    
-                    // Sort by date to find the last message
-                    allMessagesWithDates.sortBy { it.first }
-                    
-                    val lastMessage = allMessagesWithDates.lastOrNull()
-                    val lastMessageRole = lastMessage?.second ?: "unknown"
-                    val lastMessageText = lastMessage?.third ?: ""
-                    val lastMessageDate = lastMessage?.first ?: 0L
-                    
-                    Log.d(TAG, "Conversation state: Last message was from '$lastMessageRole' at $lastMessageDate: '$lastMessageText'")
-                    
-                    // If WE sent the last message, we're WAITING for a reply - don't send anything
-                    if (lastMessageRole == "you") {
+                    // If no inbox messages, we're waiting for a reply - skip instantly
+                    if (messages.isEmpty()) {
                         contactsWaitingForReply++
-                        Log.d(TAG, "STATUS: We are WAITING for a reply - we sent the last message, skipping all messages")
-                        continue // Skip this contact - we're waiting for them to respond
+                        Log.d(TAG, "STATUS: No inbox messages - we're waiting for a reply, skipping contact instantly")
+                        continue
                     }
+                    
+                    // Quickly find the last message timestamp from both inbox and sent
+                    val lastInboxDate = messages.maxOfOrNull { it.second } ?: 0L
+                    val lastSentDate = sentMessagesWithDates.maxOfOrNull { it.second } ?: 0L
+                    
+                    // If we sent the last message (sent date is more recent), skip instantly - we're waiting for their reply
+                    if (lastSentDate > lastInboxDate) {
+                        contactsWaitingForReply++
+                        Log.d(TAG, "STATUS: We sent the last message (sent: $lastSentDate > inbox: $lastInboxDate) - waiting for reply, skipping contact instantly")
+                        continue // Skip this entire conversation - we're waiting for them to respond
+                    }
+                    
+                    // They sent the last message - we need to respond, continue processing
+                    Log.d(TAG, "Found ${sentMessagesWithDates.size} sent messages to $canonicalAddress in SMS database")
                     
                     // If THEY sent the last message, we NEED TO RESPOND
-                    // Now find ALL messages from them that we haven't responded to
                     contactsNeedingResponse++
-                    Log.d(TAG, "STATUS: We NEED TO RESPOND - they sent the last message")
                     
-                    // Scan through ALL messages from this contact (newest first)
-                    // Process EVERY unresponded message - don't stop after the first one
-                    for ((messageText, messageDate) in messages) {
-                        
-                        // Reduce logging frequency for large scans to avoid performance issues
-                        if (totalUnresponded % 50 == 0 || totalUnresponded < 10 || totalScanned < 100) {
-                            Log.d(TAG, "Checking message from $address: $messageText (date: $messageDate) [Progress: $totalUnresponded unresponded found]")
+                    // CRITICAL: Find our most recent sent message to determine what we should respond to
+                    val sortedSentMessages = sentMessagesWithDates.sortedByDescending { it.second } // Newest first
+                    val ourMostRecentSentDate = sortedSentMessages.firstOrNull()?.second ?: 0L
+                    val ourMostRecentSentText = sortedSentMessages.firstOrNull()?.first ?: ""
+                    
+                    Log.i(TAG, "Our most recent message to $canonicalAddress: '$ourMostRecentSentText' (date: $ourMostRecentSentDate)")
+                    
+                    // Find the most recent message THEY sent AFTER our most recent message
+                    // Sort their messages by date (newest first)
+                    val sortedInboxMessages = messages.sortedByDescending { it.second } // Newest first
+                    
+                    var messageToRespondTo: UnrespondedMessage? = null
+                    
+                    // Scan through their messages (newest first) to find the first one AFTER our most recent message
+                    for ((messageText, messageDate) in sortedInboxMessages) {
+                        // Only consider messages that came AFTER our most recent sent message
+                        if (ourMostRecentSentDate > 0 && messageDate <= ourMostRecentSentDate) {
+                            Log.d(TAG, "Skipping message from $canonicalAddress (date: $messageDate) - it came before or at the same time as our most recent message (date: $ourMostRecentSentDate)")
+                            continue
                         }
                         
-                        val messageHash = hashMessage(address, messageText)
+                        val messageHash = hashMessage(canonicalAddress, messageText)
                         
-                        // CRITICAL: Check if we sent a message AFTER this incoming message using TIMESTAMPS
-                        // Read fresh data from SMS database - don't trust cached data
+                        // Check if we already responded to this specific message
+                        val maxResponseTime = messageDate + 86400000L // 24 hours
                         var hasResponseAfter = false
-                        var responseText = ""
-                        var responseDate = 0L
                         
-                        // OPTIMIZED: Check sent messages efficiently - use binary search since they're sorted
-                        // Since sentMessagesWithDates is sorted ASC (oldest first), we can optimize the search
-                        // Only check sent messages that could possibly be responses (within reasonable time window)
-                        // For large message volumes, this avoids checking thousands of old messages
-                        val maxResponseTime = messageDate + 86400000L // 24 hours - responses typically come within this window
-                        var foundResponse = false
-                        
-                        // Use binary search approach: find first sent message after this incoming message
-                        // Since list is sorted ASC, we can iterate and break early
+                        // Check if we sent a message AFTER this incoming message
                         for ((sentText, sentDate) in sentMessagesWithDates) {
-                            // Early exit: if sent message is too old (before incoming), skip
-                            if (sentDate < messageDate - 86400000L) { // More than 24h before - definitely not a response
-                                continue
-                            }
-                            // Early exit: if sent message is way after (more than 24h), no point checking further
-                            if (sentDate > maxResponseTime) {
+                            if (sentDate < messageDate - 86400000L) continue // Too old
+                            if (sentDate > maxResponseTime) break // Too new
+                            if (sentDate > messageDate + 1000) { // Response after incoming (1 second buffer)
+                                hasResponseAfter = true
+                                Log.d(TAG, "Already responded to message from $canonicalAddress (their message: $messageDate, our response: $sentDate)")
                                 break
                             }
-                            // Response must come AFTER the incoming message (with small buffer for timing)
-                            if (sentDate > messageDate + 1000) { // 1 second buffer to account for timing differences
-                                hasResponseAfter = true
-                                responseText = sentText
-                                responseDate = sentDate
-                                foundResponse = true
-                                // Don't log for every message in large scans - only log occasionally
-                                if (totalUnresponded % 50 == 0 || totalUnresponded < 10) {
-                                    Log.d(TAG, "Found response sent AFTER incoming message: '$sentText' (sent: $sentDate, received: $messageDate, diff: ${sentDate - messageDate}ms)")
-                                }
-                                break // Found a response, no need to check further
-                            }
                         }
                         
-                        // Only log detailed debugging for first few messages or in small scans
-                        if (!hasResponseAfter && sentMessagesWithDates.isNotEmpty() && (totalUnresponded < 5 || totalScanned < 100)) {
-                            Log.d(TAG, "No response found after message. Sent messages to this contact:")
-                            sentMessagesWithDates.take(10).forEach { (text, date) -> // Only show first 10 to avoid spam
-                                val diff = date - messageDate
-                                Log.d(TAG, "  Sent: '$text' at $date (diff: ${diff}ms from incoming)")
-                            }
-                        }
-                        
-                        // Only mark as responded if we have PROOF: a sent message with timestamp AFTER incoming message
+                        // If already responded, skip this message
                         if (hasResponseAfter) {
-                            Log.d(TAG, "VERIFIED: Found response in SMS database sent AFTER this message (${responseDate - messageDate}ms later), skipping: $messageText")
-                            // Mark in responded_messages set for future scans
                             respondedMessages.add(messageHash)
                             continue
                         }
                         
-                        // No response found in SMS database - this message is unresponded
-                        Log.d(TAG, "NO response found in SMS database sent AFTER this message - treating as unresponded: $messageText")
-                        
-                        // Don't trust responded_messages set alone - always verify with fresh SMS database
-                        if (respondedMessages.contains(messageHash) && !hasResponseAfter) {
-                            Log.d(TAG, "WARNING: Message in responded_messages set but NO actual response found in SMS database - treating as unresponded: $messageText")
-                            // Remove from set since we can't verify it
-                            respondedMessages.remove(messageHash)
+                        // Check if we've already queued a response for this contact in this scan
+                        // Only process ONE message per contact to prevent sending multiple messages
+                        val alreadyQueuedForContact = unrespondedMessagesToProcess.any { 
+                            android.telephony.PhoneNumberUtils.compare(context, it.address, canonicalAddress) 
+                        }
+                        if (alreadyQueuedForContact) {
+                            Log.d(TAG, "Already queued a response for $canonicalAddress in this scan - skipping additional messages from this contact")
+                            continue
                         }
                         
-                        // This message hasn't been responded to - check with backend
-                        Log.d(TAG, "Found unresponded message from $address: $messageText")
+                        // Let AI backend decide what to ignore and what to send - no client-side filtering
+                        // Found the message to respond to - this is the most recent message from them AFTER our last message
+                        totalUnresponded++
+                        Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        Log.i(TAG, "FOUND MESSAGE TO RESPOND TO from $canonicalAddress:")
+                        Log.i(TAG, "  Their message: '$messageText' (date: $messageDate)")
+                        Log.i(TAG, "  Our last message: '$ourMostRecentSentText' (date: $ourMostRecentSentDate)")
+                        Log.i(TAG, "  Time difference: ${messageDate - ourMostRecentSentDate}ms")
                         
-                        // Build FULL conversation history - include ALL messages from entire conversation
-                        // This ensures AI reads the complete chat context, not just messages up to this point
-                        // CRITICAL: Always refresh and read ALL messages from the entire chat
-                        val turnsUpToMessage = buildConversationHistoryUpToMessage(
-                            messages, // ALL inbox messages (full conversation - refreshed from database)
-                            sentMessagesWithDates, // ALL sent messages (full conversation - refreshed from database)
+                        // Build FULL conversation history (scan whole conversation for clarity)
+                        // Always include ALL messages from last week for full context, even when scanning for new messages
+                        // Get full conversation history (not just messages since timestamp)
+                        val fullInboxMessages = if (sinceTimestamp != null) {
+                            // When scanning for new messages, we need full conversation history
+                            // Re-query inbox messages from last week for this contact
+                            val fullHistoryMinDate = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
+                            val fullHistory = mutableListOf<Pair<String, Long>>()
+                            try {
+                                context.contentResolver.query(
+                                    inbox,
+                                    arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
+                                    "${Telephony.Sms.ADDRESS} = ? AND ${Telephony.Sms.DATE} >= ?",
+                                    arrayOf(canonicalAddress, fullHistoryMinDate.toString()),
+                                    "${Telephony.Sms.DATE} ASC"
+                                )?.use { cursor ->
+                                    while (cursor.moveToNext()) {
+                                        val addr = cursor.getString(0) ?: continue
+                                        val body = cursor.getString(1) ?: continue
+                                        val date = cursor.getLong(2)
+                                        if (android.telephony.PhoneNumberUtils.compare(context, addr, canonicalAddress)) {
+                                            fullHistory.add(body to date)
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error reading full inbox history: ${e.message}", e)
+                                messages // Fallback to filtered messages
+                            }
+                            fullHistory.ifEmpty { messages }
+                        } else {
+                            messages
+                        }
+                        
+                        val conversationHistory = buildConversationHistoryUpToMessage(
+                            fullInboxMessages,
+                            sentMessagesWithDates,
                             messageText,
                             messageDate
                         )
                         
-                        // Reduce verbose logging for large scans
-                        if (totalUnresponded % 50 == 0 || totalUnresponded < 10 || totalScanned < 100) {
-                            Log.d(TAG, "REFRESHED: Read ALL ${turnsUpToMessage.size} messages from entire chat history for $address")
-                            Log.d(TAG, "Checking with backend for message: $messageText")
-                            if (turnsUpToMessage.size <= 20) { // Only log full history for small conversations
-                                Log.d(TAG, "Conversation history: ${turnsUpToMessage.size} turns (ALL messages from entire conversation)")
-                                turnsUpToMessage.forEachIndexed { index, turn ->
-                                    Log.d(TAG, "  Turn $index: ${turn["role"]} - ${turn["text"]}")
-                                }
-                            } else {
-                                Log.d(TAG, "Conversation history: ${turnsUpToMessage.size} turns (large conversation - skipping detailed log)")
-                            }
-                        }
+                        Log.i(TAG, "  Conversation history: ${conversationHistory.size} turns (full context for AI)")
                         
-                        // This is an unresponded message
-                        totalUnresponded++
-                        // Log progress every 50 messages or for first 10, or every 100th message in very large scans
-                        if (totalUnresponded % 50 == 0 || totalUnresponded < 10 || (totalScanned > 1000 && totalUnresponded % 100 == 0)) {
-                            Log.d(TAG, "Found unresponded message #$totalUnresponded from $address: $messageText [Progress: $totalUnresponded/$totalScanned]")
-                        }
+                        // Create UnrespondedMessage for this message
+                        messageToRespondTo = UnrespondedMessage(
+                            address = canonicalAddress,
+                            messageText = messageText,
+                            messageHash = messageHash,
+                            conversationHistory = conversationHistory,
+                            messageDate = messageDate
+                        )
                         
-                        // Check with backend if we should respond
-                        val shouldRespond = checkIfShouldRespond(context, address, turnsUpToMessage, messageText, messageHash)
-                        
-                        if (shouldRespond) {
-                            totalQueued++
-                            // Log progress periodically
-                            if (totalQueued % 25 == 0 || totalQueued < 10 || (totalScanned > 1000 && totalQueued % 50 == 0)) {
-                                Log.d(TAG, "Queued response #$totalQueued for $address: $messageText [Progress: $totalQueued responses queued]")
-                            }
-                            // Continue to next message - process ALL unresponded messages
+                        // Found the message to respond to - stop checking older messages
+                        break
+                    }
+                    
+                    // Add message to processing list if found
+                    if (messageToRespondTo != null) {
+                        unrespondedMessagesToProcess.add(messageToRespondTo)
+                        Log.i(TAG, "✓ Added message from $canonicalAddress to processing queue")
+                        Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    } else {
+                        if (ourMostRecentSentDate > 0) {
+                            Log.d(TAG, "No messages found from $canonicalAddress AFTER our most recent message (date: $ourMostRecentSentDate)")
                         } else {
-                            // Reduce logging for NO_SEND in large scans
-                            if (totalUnresponded % 100 == 0 || totalUnresponded < 10) {
-                                Log.d(TAG, "Backend said NO_SEND for unresponded message: $messageText")
-                            }
-                            // Continue to next message - process ALL unresponded messages
-                        }
-                        
-                        // Add small delay every 100 messages to prevent overwhelming the system
-                        if (totalUnresponded % 100 == 0 && totalUnresponded > 0) {
-                            Thread.sleep(100) // Brief pause every 100 messages
+                            Log.d(TAG, "No unresponded messages found for $canonicalAddress (all messages have been responded to or skipped)")
                         }
                     }
                     
@@ -323,6 +435,114 @@ object MessageScanner {
                     if (respondedMessages.isNotEmpty()) {
                         prefs.edit().putStringSet("responded_messages", respondedMessages).apply()
                     }
+                    
+                    contactsProcessed++
+                    if (contactsProcessed % 10 == 0) {
+                        Log.d(TAG, "Progress: Processed $contactsProcessed/${messagesByAddress.size} contacts...")
+                    }
+                }
+                
+                Log.d(TAG, "Finished processing all ${messagesByAddress.size} contacts")
+                notifyStatus("✅ Scan complete: ${messagesByAddress.size} contacts processed")
+                
+                // ALWAYS limit the number of messages processed to prevent sending too many at once
+                // Sort by date (most recent first) and take only the most recent messages
+                val sortedMessages = unrespondedMessagesToProcess.sortedByDescending { it.messageDate }
+                
+                // HARD LIMIT: Never process more than 30 messages per scan (one per contact)
+                // This prevents sending hundreds of messages at once
+                val MAX_MESSAGES_PER_SCAN = 30
+                
+                val messagesToProcess = if (sinceTimestamp != null) {
+                    // When scanning for new messages, filter to only messages received after timestamp
+                    // Also ensure we only have one message per contact
+                    val uniqueContacts = mutableSetOf<String>()
+                    val filtered = sortedMessages.filter { message ->
+                        val normalized = android.telephony.PhoneNumberUtils.normalizeNumber(message.address) ?: message.address
+                        message.messageDate >= sinceTimestamp && uniqueContacts.add(normalized)
+                    }.take(MAX_MESSAGES_PER_SCAN) // HARD LIMIT: 30 contacts max
+                    Log.i(TAG, "Scanning for NEW messages: Found ${unrespondedMessagesToProcess.size} total, filtered to ${filtered.size} messages after timestamp (one per contact, max ${MAX_MESSAGES_PER_SCAN} per scan)")
+                    if (unrespondedMessagesToProcess.size > MAX_MESSAGES_PER_SCAN) {
+                        Log.w(TAG, "⚠️ WARNING: Found ${unrespondedMessagesToProcess.size} unresponded messages but limiting to ${MAX_MESSAGES_PER_SCAN} to prevent sending too many at once")
+                    }
+                    filtered
+                } else {
+                    // Full scan: limit to 30 most recent unresponded messages to prevent processing hundreds
+                    // Also ensure we only have one message per contact
+                    val uniqueContacts = mutableSetOf<String>()
+                    val limited = sortedMessages.filter { message ->
+                        val normalized = android.telephony.PhoneNumberUtils.normalizeNumber(message.address) ?: message.address
+                        if (uniqueContacts.add(normalized)) {
+                            true // First message from this contact
+                        } else {
+                            false // Already have a message from this contact
+                        }
+                    }.take(MAX_MESSAGES_PER_SCAN) // HARD LIMIT: 30 contacts max
+                    Log.i(TAG, "Full scan: Found ${unrespondedMessagesToProcess.size} unresponded messages, limiting to ${limited.size} most recent (one per contact, max ${MAX_MESSAGES_PER_SCAN} per scan)")
+                    if (unrespondedMessagesToProcess.size > MAX_MESSAGES_PER_SCAN) {
+                        Log.w(TAG, "⚠️ WARNING: Found ${unrespondedMessagesToProcess.size} unresponded messages but limiting to ${MAX_MESSAGES_PER_SCAN} to prevent sending too many at once")
+                    }
+                    limited
+                }
+                
+                // FINAL SAFETY CHECK: Ensure we never process more than the limit
+                val finalMessagesToProcess = messagesToProcess.take(MAX_MESSAGES_PER_SCAN)
+                if (finalMessagesToProcess.size < messagesToProcess.size) {
+                    Log.w(TAG, "⚠️ SAFETY CHECK: Further limited from ${messagesToProcess.size} to ${finalMessagesToProcess.size} messages to enforce hard limit")
+                }
+                
+                // Process messages ONE AT A TIME (sequential processing)
+                if (finalMessagesToProcess.isNotEmpty()) {
+                    Log.i(TAG, "Processing ${finalMessagesToProcess.size} unresponded messages ONE AT A TIME (sequential)...")
+                    notifyStatus("📤 Processing ${finalMessagesToProcess.size} messages...")
+                    notifyQueueCount(finalMessagesToProcess.size)
+                    
+                    val startTime = System.currentTimeMillis()
+                    
+                    // Process each message sequentially - one number at a time
+                    for ((index, unrespondedMsg) in finalMessagesToProcess.withIndex()) {
+                        try {
+                            Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                            Log.i(TAG, "Processing message ${index + 1}/${finalMessagesToProcess.size} from ${unrespondedMsg.address}")
+                            Log.i(TAG, "Message text: ${unrespondedMsg.messageText.take(100)}...")
+                            
+                            val shouldRespond = checkIfShouldRespond(
+                                context,
+                                unrespondedMsg.address,
+                                unrespondedMsg.conversationHistory,
+                                unrespondedMsg.messageText,
+                                unrespondedMsg.messageHash
+                            )
+                            
+                            if (shouldRespond) {
+                                totalQueued.incrementAndGet()
+                                val remaining = finalMessagesToProcess.size - (index + 1)
+                                Log.i(TAG, "✓✓✓ RESPONSE QUEUED for ${unrespondedMsg.address} (${totalQueued.get()} total queued)")
+                                notifyStatus("💬 Queued response ${index + 1}/${finalMessagesToProcess.size} (${remaining} remaining)")
+                                notifyQueueCount(remaining)
+                            } else {
+                                Log.d(TAG, "No response needed for ${unrespondedMsg.address}")
+                            }
+                            
+                            // Reduced delay between messages to speed up processing
+                            if (index < finalMessagesToProcess.size - 1) {
+                                Thread.sleep(500) // 500ms delay between messages (reduced from 1 second)
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "✗✗✗ ERROR processing message from ${unrespondedMsg.address}: ${e.message}", e)
+                            // Continue with next message even if this one fails
+                        }
+                    }
+                    
+                    val elapsed = System.currentTimeMillis() - startTime
+                    Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    Log.i(TAG, "Sequential processing complete: ${totalQueued.get()} responses sent in ${elapsed}ms")
+                    notifyStatus("✅ Processing complete: ${totalQueued.get()} responses queued")
+                    notifyQueueCount(0)
+                } else {
+                    Log.d(TAG, "No unresponded messages found - all messages have been responded to")
+                    notifyStatus("✅ No messages require responses")
+                    notifyQueueCount(0)
                 }
                 
                 // Summary of conversation states
@@ -333,7 +553,7 @@ object MessageScanner {
                 Log.d(TAG, "=== SCAN COMPLETE ===")
                 Log.d(TAG, "Total messages scanned: $totalScanned")
                 Log.d(TAG, "Unresponded messages found: $totalUnresponded")
-                Log.d(TAG, "Responses queued: $totalQueued")
+                Log.d(TAG, "Responses queued: ${totalQueued.get()}")
                 Log.d(TAG, "Contacts needing responses: $contactsNeedingResponse")
                 Log.d(TAG, "Contacts waiting for replies: $contactsWaitingForReply")
                 if (totalScanned > 1000) {
@@ -356,6 +576,16 @@ object MessageScanner {
                 }
                 synchronized(scanLock) {
                     isScanning = false
+                    // If a rescan was requested while we were scanning, trigger it now
+                    if (pendingRescan) {
+                        pendingRescan = false
+                        Log.d(TAG, "Pending rescan detected - triggering new scan after current scan completed")
+                        // Trigger rescan on a new thread to avoid blocking
+                        Thread {
+                            Thread.sleep(500) // Small delay to ensure current scan is fully finished
+                            scanAllMessages(context)
+                        }.start()
+                    }
                 }
             }
         }.start()
@@ -368,44 +598,107 @@ object MessageScanner {
         return hashBytes.joinToString("") { "%02x".format(it) }
     }
     
+    /**
+     * Check if message should be skipped (filtering only - no response generation)
+     * Returns true if message should be skipped, false if it should be sent to AI
+     */
+    private fun shouldSkipMessage(messageText: String, address: String): Boolean {
+        val lower = messageText.lowercase().trim()
+        
+        // Skip messages that are just punctuation (like "?")
+        if (messageText.trim().matches(Regex("^[?!.,;:]+$"))) {
+            Log.d(TAG, "Skipping message that is just punctuation: $messageText")
+            return true
+        }
+        
+        // Skip rude/inappropriate messages
+        val rudeWords = listOf(
+            "fuck", "fuck off", "fuck you", "fucking", "shit", "damn", "bitch", "bastard",
+            "piss off", "piss", "crap", "hell", "asshole", "dick", "cock", "pussy",
+            "cunt", "wanker", "twat", "tosser", "bellend", "arse", "arsehole"
+        )
+        val isRude = rudeWords.any { lower.contains(it) }
+        if (isRude) {
+            Log.d(TAG, "Skipping rude/inappropriate message: $messageText")
+            return true
+        }
+        
+        // Skip messages that indicate they don't believe we are their son/daughter or rejection messages
+        val disbeliefKeywords = listOf(
+            "my dead child", "dead child", "my child is dead", "child is dead",
+            "you're not my", "you are not my", "not my son", "not my daughter",
+            "not my child", "don't have a son", "don't have a daughter", "don't have a child",
+            "i don't have a son", "i don't have a daughter", "i don't have a child",
+            "who is this really", "who are you really", "this is a scam", "this is scam",
+            "scammer", "scam", "fraud", "fake", "liar", "lying", "you're lying",
+            "you are lying", "this is fake", "not my kid", "not my kids",
+            "go away im not dad", "go away im not ur dad", "go away im not your dad",
+            "go away i'm not dad", "go away i'm not ur dad", "go away i'm not your dad",
+            "im not dad", "i'm not dad", "im not ur dad", "i'm not ur dad",
+            "im not your dad", "i'm not your dad", "not dad", "not ur dad", "not your dad",
+            "go away", "leave me alone", "stop messaging", "stop texting"
+        )
+        val isDisbelief = disbeliefKeywords.any { lower.contains(it) }
+        if (isDisbelief) {
+            Log.d(TAG, "Skipping message indicating disbelief in relationship or rejection: $messageText")
+            return true
+        }
+        
+        // Skip automated/system messages (like O2UK balance, service provider messages, etc.)
+        val isSystemMessage = lower.contains("balance") || lower.contains("top up") || 
+                              lower.contains("call 4444") || lower.contains("your balance") ||
+                              lower.contains("configure your number") || lower.contains("sms url") ||
+                              lower.contains("reply help for help") || lower.contains("reply stop to unsubscribe") ||
+                              lower.contains("msg&data rates may apply") || lower.contains("msg and data rates") ||
+                              lower.contains("thanks for the message") && lower.contains("configure") ||
+                              address.equals("O2UK", ignoreCase = true) ||
+                              address.matches(Regex("^[A-Z0-9]+$")) // All caps/numbers = likely system
+        if (isSystemMessage) {
+            Log.d(TAG, "Skipping system/automated message from $address: $messageText")
+            return true
+        }
+        
+        // Don't skip - send to AI for response
+        return false
+    }
+    
     private fun buildConversationHistoryUpToMessage(
         inboxMessages: List<Pair<String, Long>>, // text, date
         sentMessages: List<Pair<String, Long>>, // text, date
         targetMessage: String,
         targetMessageDate: Long
     ): List<Map<String, String>> {
-        // Build FULL conversation history - include ALL messages from entire conversation
-        // CRITICAL: Always refresh and include ALL messages - never use cached data
-        // This ensures AI reads the complete chat context for better understanding
+        // Include ALL messages for full context - scan EVERY SINGLE MESSAGE in the conversation
+        // No limits, no filtering - AI needs complete context to respond appropriately
         val allMessages = mutableListOf<Triple<Long, String, String>>() // date, role, text
         
-        // Add ALL inbox messages (from them) - full conversation (fresh from database)
+        // Add inbox messages (from them)
         for ((text, date) in inboxMessages) {
             allMessages.add(Triple(date, "them", text))
         }
         
-        // Add ALL sent messages (from you) - full conversation (fresh from database)
+        // Add sent messages (from you)
         for ((text, date) in sentMessages) {
             allMessages.add(Triple(date, "you", text))
         }
         
-        // Sort by date to get chronological order - include ALL messages
+        // Sort by date to get chronological order
         allMessages.sortBy { it.first }
-        val turns = mutableListOf<Map<String, String>>()
         
-        // Include ALL messages from the conversation for full context
-        // CRITICAL: Every scan reads ALL messages fresh - no caching
+        // Include ALL messages for full context (scan whole conversation for clarity)
+        // This ensures AI has complete context to respond appropriately
+        val turns = mutableListOf<Map<String, String>>()
         for ((date, role, text) in allMessages) {
             turns.add(mapOf("role" to role, "text" to text))
         }
         
-        // Ensure target message is included (it should already be in inboxMessages, but add if missing)
+        // Ensure target message is included (it should already be in allMessages, but add if missing)
         val targetFound = turns.any { it["role"] == "them" && it["text"] == targetMessage }
         if (!targetFound) {
             turns.add(mapOf("role" to "them", "text" to targetMessage))
         }
         
-        Log.d(TAG, "REFRESHED: Built FULL conversation history with ${turns.size} turns (ALL messages from entire conversation - fresh from database)")
+        Log.d(TAG, "Built FULL conversation history with ${turns.size} turns (scanning whole conversation for clarity)")
         
         return turns
     }
@@ -420,9 +713,9 @@ object MessageScanner {
         try {
             val url = "https://agreement-detector-api.onrender.com/respond"
             val client = OkHttpClient.Builder()
-                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS) // Increased to 60s to handle slow backend
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS) // Increased to 30s for slow connections
+                .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS) // Increased to 60s for large payloads
                 .build()
             val turnsArray = JSONArray()
             for (turn in turns) {
@@ -448,17 +741,26 @@ object MessageScanner {
                 .post(RequestBody.create("application/json".toMediaType(), requestBody))
                 .build()
             
-            client.newCall(request).execute().use { response ->
+            // Retry logic for 502 Bad Gateway and timeouts (up to 3 retries)
+            var lastException: Exception? = null
+            var retryCount = 0
+            val maxRetries = 3
+            
+            var result = false
+            while (retryCount <= maxRetries) {
+                var shouldRetry = false
                 try {
+                    val responseResult = client.newCall(request).execute().use { response ->
+                        try {
                 if (response.isSuccessful) {
-                        val body = response.body?.string()
-                        if (body == null) {
-                            // Body is null, ensure it's closed
-                            try {
-                                response.body?.close()
-                            } catch (ignored: Exception) {}
-                            return false
-                        }
+                                val body = response.body?.string()
+                                if (body == null) {
+                                    // Body is null, ensure it's closed
+                                    try {
+                                        response.body?.close()
+                                    } catch (ignored: Exception) {}
+                                    return@use false
+                                }
                     val json = JSONObject(body)
                     val action = json.getString("action")
                     val messageToSend = json.getString("response")
@@ -466,13 +768,20 @@ object MessageScanner {
                     
                     Log.d(TAG, "Backend response for $address: action=$action, messageLength=${messageToSend.length}, reasoning=$reasoning")
                     
-                    if (action == "SEND" && messageToSend.isNotEmpty()) {
-                        Log.d(TAG, "Backend says SEND for $address: $messageToSend")
-                        // Queue the response with incoming message hash so it can be marked as responded after successful send
-                        AutoSendQueue.enqueue(context, address, messageToSend, AutoSendQueue.Source.AI, incomingMessageHash)
-                        return true
-                    } else {
-                        Log.d(TAG, "Backend says NO_SEND for $address: action=$action, messageEmpty=${messageToSend.isEmpty()}, reasoning=$reasoning")
+                                if (action == "SEND" && messageToSend.isNotEmpty()) {
+                                    Log.d(TAG, "Backend says SEND for $address: $messageToSend")
+                                    // AI chose the response - queue it for sending (reliable method)
+                                    try {
+                                        AutoSendQueue.enqueue(context, address, messageToSend, AutoSendQueue.Source.AI, incomingMessageHash)
+                                        Log.i(TAG, "✓✓✓ MESSAGE QUEUED FOR SENDING: '$messageToSend' to $address (hash: $incomingMessageHash)")
+                                        notifyStatus("📨 Queued message to ${address.takeLast(4)}")
+                                        return@use true
+                                    } catch (e: Exception) {
+                                        Log.e(TAG, "✗ FAILED TO QUEUE MESSAGE: Error queuing '$messageToSend' to $address: ${e.message}", e)
+                                        return@use false
+                                    }
+                                } else {
+                                    Log.d(TAG, "Backend says NO_SEND for $address: action=$action, messageEmpty=${messageToSend.isEmpty()}, reasoning=$reasoning")
                             
                             // AI should respond to ALL questions naturally
                             val latestMessageLower = latestMessage.lowercase()
@@ -606,9 +915,14 @@ object MessageScanner {
                                 // If payment request was sent and they're asking what it's for, respond with macbook explanation
                                 if (paymentRequestWasSent && isPaymentParagraphQuestion) {
                                     val macbookResponse = "Its for a macbook i got i just need to pay it back if that's okay, I'll have it sent back to you tomorrow first thing"
-                                    AutoSendQueue.enqueue(context, address, macbookResponse, AutoSendQueue.Source.AI, incomingMessageHash)
-                                    Log.d(TAG, "Payment paragraph question detected - queued macbook response: $macbookResponse")
-                                    return true
+                                    try {
+                                        AutoSendQueue.enqueue(context, address, macbookResponse, AutoSendQueue.Source.AI, incomingMessageHash)
+                                        Log.i(TAG, "✓✓✓ Payment paragraph question - message queued: $macbookResponse")
+                                        return@use true
+                                    } catch (e: Exception) {
+                                        Log.e(TAG, "Failed to queue macbook response: ${e.message}", e)
+                                        return@use false
+                                    }
                                 }
                                 
                                 if (shouldUseFallback) {
@@ -805,31 +1119,92 @@ object MessageScanner {
                                     }
                                     
                                     if (fallbackResponse.isNotEmpty()) {
-                                        AutoSendQueue.enqueue(context, address, fallbackResponse, AutoSendQueue.Source.AI, incomingMessageHash)
-                                        Log.d(TAG, "Fallback response queued: $fallbackResponse")
-                                        return true
+                                        try {
+                                            AutoSendQueue.enqueue(context, address, fallbackResponse, AutoSendQueue.Source.AI, incomingMessageHash)
+                                            Log.i(TAG, "✓✓✓ Fallback response queued: $fallbackResponse")
+                                            return@use true
+                                        } catch (e: Exception) {
+                                            Log.e(TAG, "Failed to queue fallback response: ${e.message}", e)
+                                            return@use false
+                                        }
                                     } else {
                                         // Fallback response was empty, continue
+                                        return@use false
+                                    }
+                                    } else {
+                                        // Not using fallback, continue
+                                        return@use false
                                     }
                                 } else {
-                                    // Not using fallback, continue
+                                    // Latest message is empty, continue
+                                    return@use false
                                 }
-                            } else {
-                                // Latest message is empty, continue
-                            }
-                        }
-                    } else {
-                        // Consume error body to prevent resource leak
-                        val errorBody = response.body?.string()
-                        Log.e(TAG, "Backend request failed for $address: ${response.code}, error: $errorBody")
+                                
+                                    // Request succeeded (even if NO_SEND), no retry needed
+                                    return@use false
                     }
-                } catch (e: Exception) {
-                    // Ensure response body is consumed even on exception
-                    try {
-                        response.body?.close()
-                    } catch (ignored: Exception) {}
-                    throw e
+                } else {
+                                // Consume error body to prevent resource leak
+                                val errorBody = response.body?.string()
+                                val is502 = response.code == 502
+                                val is503 = response.code == 503
+                                val is504 = response.code == 504
+                                
+                                if ((is502 || is503 || is504) && retryCount < maxRetries) {
+                                    // Server error - signal to retry
+                                    shouldRetry = true
+                                    retryCount++
+                                    val delayMs = (1000L * (1 shl retryCount)).coerceAtMost(10000L) // Max 10s delay
+                                    Log.w(TAG, "Backend returned ${response.code} for $address - retrying in ${delayMs}ms (attempt $retryCount/$maxRetries)")
+                                    Thread.sleep(delayMs)
+                                    return@use false
+                                } else {
+                                    Log.e(TAG, "Backend request failed for $address: ${response.code}, error: ${errorBody?.take(200)}")
+                                    return@use false
                 }
+            }
+        } catch (e: Exception) {
+                            // Ensure response body is consumed even on exception
+                            try {
+                                response.body?.close()
+                            } catch (ignored: Exception) {}
+                            throw e
+                        }
+                    }
+                    
+                    // If we got a result (not a retry), return it
+                    if (!shouldRetry) {
+                        result = responseResult
+                        if (result) return true
+                        return false
+                    }
+                    // Otherwise continue loop to retry
+                } catch (e: Exception) {
+                    // Check if it's a timeout or connection error that we should retry
+                    val isRetryable = e is java.net.SocketTimeoutException || 
+                                    e is java.net.ConnectException ||
+                                    e.message?.contains("timeout", ignoreCase = true) == true ||
+                                    e.message?.contains("timed out", ignoreCase = true) == true
+                    
+                    if (isRetryable && retryCount < maxRetries) {
+                        retryCount++
+                        val delayMs = (1000L * (1 shl retryCount)).coerceAtMost(10000L) // Max 10s delay
+                        Log.w(TAG, "Request failed for $address (${e.message}) - retrying in ${delayMs}ms (attempt $retryCount/$maxRetries)")
+                        lastException = e
+                        Thread.sleep(delayMs)
+                        // Continue loop to retry
+                    } else {
+                        // Not retryable or max retries reached
+                        lastException = e
+                        break // Exit retry loop
+                    }
+                }
+            }
+            
+            // If we exhausted retries, return false
+            if (retryCount > maxRetries && lastException != null) {
+                Log.e(TAG, "Max retries ($maxRetries) exceeded for $address: ${lastException?.message}")
+                return false
             }
         } catch (e: Exception) {
             // Check if it's a timeout exception - log but don't fail completely
@@ -839,12 +1214,128 @@ object MessageScanner {
                           e.message?.contains("timed out", ignoreCase = true) == true
             
             if (isTimeout) {
-                Log.w(TAG, "Timeout exception checking if should respond: ${e.message}")
+                Log.w(TAG, "Timeout exception checking if should respond for $address: ${e.message}")
+                // Don't retry on timeout - backend is likely overloaded, skip this message
             } else {
-            Log.e(TAG, "Error checking if should respond: ${e.message}", e)
+                Log.e(TAG, "Error checking if should respond for $address: ${e.message}", e)
             }
         }
         return false
+    }
+    
+    /**
+     * Send SMS directly (AI chooses response, but we send it directly without queue)
+     */
+    private fun sendSmsDirectly(context: Context, address: String, text: String, incomingMessageHash: String?) {
+        try {
+            Log.i(TAG, "→→ PREPARING TO SEND SMS: '$text' to $address (hash: $incomingMessageHash)")
+            
+            // Get SMS manager
+            val smsManager = try {
+                val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                val preferred = prefs.getInt("preferred_subid", SubscriptionManager.INVALID_SUBSCRIPTION_ID)
+                val subMgr = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+                val subId = if (preferred != SubscriptionManager.INVALID_SUBSCRIPTION_ID) preferred else SubscriptionManager.getDefaultSmsSubscriptionId()
+                if (subId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+                    Log.d(TAG, "Using SMS manager for subscription ID: $subId")
+                    SmsManager.getSmsManagerForSubscriptionId(subId)
+                } else {
+                    Log.d(TAG, "Using default SMS manager")
+                    SmsManager.getDefault()
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "Error getting SMS manager, using default: ${e.message}")
+                SmsManager.getDefault()
+            }
+            
+            // Create unique request code for this message to avoid conflicts
+            val requestCode = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+            
+            // Create sent intent to track delivery
+            val sentIntent = PendingIntent.getBroadcast(
+                context.applicationContext,
+                requestCode,
+                Intent("SMS_SENT").apply {
+                    putExtra("addr", address)
+                    putExtra("text", text)
+                    if (incomingMessageHash != null) {
+                        putExtra("incoming_message_hash", incomingMessageHash)
+                    }
+                },
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            
+            val deliveredIntent = PendingIntent.getBroadcast(
+                context.applicationContext,
+                requestCode + 1000,
+                Intent("SMS_DELIVERED"),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            
+            Log.d(TAG, "Created PendingIntents for SMS send (requestCode: $requestCode)")
+            
+            // Send message (with 2 second delay as requested)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                try {
+                    Log.i(TAG, "→→ ATTEMPTING TO SEND SMS NOW: '$text' to $address")
+                    
+                    val parts = smsManager.divideMessage(text)
+                    if (parts != null && parts.size > 1) {
+                        // Multipart message
+                        Log.d(TAG, "Message will be sent as multipart (${parts.size} parts)")
+                        val sentIntents = ArrayList<PendingIntent>(parts.size).apply {
+                            repeat(parts.size) { add(sentIntent) }
+                        }
+                        val deliveredIntents = ArrayList<PendingIntent>(parts.size).apply {
+                            repeat(parts.size) { add(deliveredIntent) }
+                        }
+                        try {
+                            smsManager.sendMultipartTextMessage(address, null, parts, sentIntents, deliveredIntents)
+                            Log.i(TAG, "✓✓✓ SMS SEND CALLED (multipart ${parts.size} parts): '$text' to $address")
+                            Log.i(TAG, "✓✓✓ VERIFICATION: sendMultipartTextMessage() method was successfully called")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "✗✗✗ EXCEPTION IN sendMultipartTextMessage CALL: ${e.message}", e)
+                            throw e
+                        }
+                    } else {
+                        // Single part message
+                        Log.d(TAG, "Message will be sent as single part")
+                        try {
+                            smsManager.sendTextMessage(address, null, text, sentIntent, deliveredIntent)
+                            Log.i(TAG, "✓✓✓ SMS SEND CALLED (single part): '$text' to $address")
+                            Log.i(TAG, "✓✓✓ VERIFICATION: sendTextMessage() method was successfully called")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "✗✗✗ EXCEPTION IN sendTextMessage CALL: ${e.message}", e)
+                            throw e
+                        }
+                    }
+                    
+                    // Mark incoming message as responded immediately (before confirmation)
+                    if (incomingMessageHash != null) {
+                        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                        val respondedMessages = prefs.getStringSet("responded_messages", null)?.toMutableSet() ?: mutableSetOf()
+                        respondedMessages.add(incomingMessageHash)
+                        prefs.edit().putStringSet("responded_messages", respondedMessages).apply()
+                        Log.d(TAG, "Marked incoming message as responded: $incomingMessageHash")
+                    }
+                    
+                    // Don't trigger rescan here - wait until all messages in AutoSendQueue are sent
+                    // The rescan will be triggered in AutoSendQueue.drain() when queue becomes empty
+                } catch (e: Exception) {
+                    Log.e(TAG, "✗✗✗ EXCEPTION CALLING SMS SEND: ${e.message}", e)
+                    Log.e(TAG, "Exception type: ${e.javaClass.simpleName}")
+                    e.printStackTrace()
+                }
+            }, 2000L) // 2 second delay before sending
+            
+            Log.d(TAG, "Scheduled SMS send in 2 seconds")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "✗✗✗ FAILED TO PREPARE SMS SEND: ${e.message}", e)
+            Log.e(TAG, "Exception type: ${e.javaClass.simpleName}")
+            e.printStackTrace()
+            throw e
+        }
     }
 }
 
