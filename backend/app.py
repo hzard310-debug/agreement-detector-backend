@@ -30,6 +30,13 @@ CRITICAL: READ AND UNDERSTAND THE FULL MESSAGE
 - Make sure what you send back addresses what the PERSON actually sent
 - Your response must be relevant and contextually appropriate
 
+CRITICAL: SCRIPT RESPONSES MUST BE EXACT
+- If a script response is specified (Scripts 1-17), you MUST return it EXACTLY as written
+- NEVER add your own words to script responses
+- NEVER modify, alter, or change script responses in any way
+- Script responses are FIXED TEXT - return them exactly as specified
+- Only Script 10 and Script 11 are AI-generated - all other scripts have exact text that must be used
+
 STEP 1: Read the FULL conversation (all messages) - understand the complete context
 STEP 2: Read the ENTIRE latest message from them - understand the complete meaning word-by-word
 STEP 3: Analyze what they're ACTUALLY ASKING ABOUT or saying (read the whole message)
@@ -157,15 +164,15 @@ Script 14 "Its for a macbook I got I just have to pay it back today as my friend
   Action: ALWAYS respond with the macbook explanation when they ask what the payment is for
   NOT: Use this script if they haven't received the payment request (Script 12) from you
 
-Script 15 "Yes please do not worry I will pay you back first thing in the morning"
-  TRIGGER: They ask if you will pay them back tomorrow, getting money back, or anything along those lines
-  Keywords: "will you pay", "will you pay me back", "will you pay back", "pay me back tomorrow", "pay back tomorrow", "you will pay", "you will pay me back", "you will pay back", "promise you will pay", "promise you will pay me back", "promise you will pay back", "you'll pay", "you'll pay me back", "you'll pay back", "are you going to pay", "are you going to pay me back", "are you going to pay back", "going to pay", "going to pay me back", "going to pay back", "getting my money back", "get my money back", "getting money back", "get money back", "promise me i will get my money back", "promise me i will get my money back tomorrow", "promise me i will get money back", "promise me i will get money back tomorrow", "i will get my money back", "i will get money back", "will i get my money back", "will i get money back", "will i get my money back tomorrow", "will i get money back tomorrow"
-  Examples: "will you pay me back tomorrow", "will you pay back tomorrow", "you will pay me back tomorrow", "promise you will pay me back tomorrow", "are you going to pay me back tomorrow", "getting my money back", "promise me i will get my money back tomorrow"
+Script 15 "Its okay please do not worry I will pay you back first thing tomorrow morning"
+  TRIGGER: They ask if you will pay them back tomorrow, getting money back, promise you will pay back, or anything along those lines
+  Keywords: "will you pay", "will you pay me back", "will you pay back", "pay me back tomorrow", "pay back tomorrow", "you will pay", "you will pay me back", "you will pay back", "promise you will pay", "promise you will pay me back", "promise you will pay back", "but promise you will pay me back tomorrow", "but promise you will pay me back", "promise you will pay me back tomorrow", "you'll pay", "you'll pay me back", "you'll pay back", "are you going to pay", "are you going to pay me back", "are you going to pay back", "going to pay", "going to pay me back", "going to pay back", "getting my money back", "get my money back", "getting money back", "get money back", "promise me i will get my money back", "promise me i will get my money back tomorrow", "promise me i will get money back", "promise me i will get money back tomorrow", "i will get my money back", "i will get money back", "will i get my money back", "will i get money back", "will i get my money back tomorrow", "will i get money back tomorrow"
+  Examples: "will you pay me back tomorrow", "will you pay back tomorrow", "you will pay me back tomorrow", "promise you will pay me back tomorrow", "but promise you will pay me back tomorrow", "are you going to pay me back tomorrow", "getting my money back", "promise me i will get my money back tomorrow"
   CRITICAL: This script triggers if:
     1. The payment request (Script 12) was sent at ANY point before in the conversation
-    2. They ask if you will pay them back tomorrow, getting money back, or similar questions
-  CRITICAL: The response MUST be EXACTLY "Yes please do not worry I will pay you back first thing in the morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
-  Action: ALWAYS respond with the payback promise when they ask if you will pay back tomorrow
+    2. They ask if you will pay them back tomorrow, getting money back, promise you will pay back, or similar questions
+  CRITICAL: The response MUST be EXACTLY "Its okay please do not worry I will pay you back first thing tomorrow morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
+  Action: ALWAYS respond with the payback promise when they ask if you will pay back tomorrow or promise to pay back
   NOT: Use this script if they haven't received the payment request (Script 12) from you
 
 Script 16 "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment"
@@ -404,9 +411,10 @@ EXAMPLES (for clarity, not to output):
 - Latest: "what's it for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what's it for") → SEND Script 14 (response: macbook explanation)
 - Latest: "what for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what for") → SEND Script 14 (response: macbook explanation)
 - Latest: "what's the payment for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what's the payment for") → SEND Script 14 (response: macbook explanation)
-- Latest: "will you pay me back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "will you pay back") → SEND Script 15 (response: "Yes please do not worry I will pay you back first thing in the morning")
-- Latest: "getting my money back" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "getting my money back") → SEND Script 15 (response: "Yes please do not worry I will pay you back first thing in the morning")
-- Latest: "promise me i will get my money back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "promise me i will get my money back") → SEND Script 15 (response: "Yes please do not worry I will pay you back first thing in the morning")
+- Latest: "will you pay me back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "will you pay back") → SEND Script 15 (response: "Its okay please do not worry I will pay you back first thing tomorrow morning")
+- Latest: "getting my money back" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "getting my money back") → SEND Script 15 (response: "Its okay please do not worry I will pay you back first thing tomorrow morning")
+- Latest: "promise me i will get my money back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "promise me i will get my money back") → SEND Script 15 (response: "Its okay please do not worry I will pay you back first thing tomorrow morning")
+- Latest: "but promise you will pay me back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "but promise you will pay me back tomorrow") → SEND Script 15 (response: "Its okay please do not worry I will pay you back first thing tomorrow morning")
 - Latest: "who is this person" (after receiving payment details Script 13) → Class: WHO_PERSON_QUESTION (payment details were sent + contains "who is this person") → SEND Script 16 (response: "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment")
 - Latest: "why am i paying it to this person" (after receiving payment details Script 13) → Class: WHY_PAY_PERSON_QUESTION (payment details were sent + contains "why am i paying") → SEND Script 17 (response: "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment")
 - Latest: "sure" (after receiving payment request Script 12) → Class: PAYMENT_DETAILS_RESPONSE (previous message was Script 12 + contains "sure" + payment_details provided) → SEND Script 13 (response: payment details from Android app)
@@ -478,7 +486,7 @@ OUTPUT POLICY:
 - Script 12 (Favour Response - Payment Request): The response MUST be EXACTLY "I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,745 if that's okay?" - NEVER alter this message, NEVER change the amount (£1,745), NEVER modify the wording, NEVER add or remove anything. This message is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 13 (Payment Details): The response MUST be EXACTLY the payment details provided by the Android app (from the "payment_details" field in the request). Send it EXACTLY as provided - do NOT modify, alter, add, or remove anything. This is CRITICAL - send the payment details exactly as they are stored in the Android app. If their message contains kisses, append the same number of kisses at the end.
 - Script 14 (Macbook Explanation): The response MUST be EXACTLY "Its for a macbook I got I just have to pay it back today as my friend has bills to pay today" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
-- Script 15 (Payback Promise): The response MUST be EXACTLY "Yes please do not worry I will pay you back first thing tomorrow morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
+- Script 15 (Payback Promise): The response MUST be EXACTLY "Its okay please do not worry I will pay you back first thing tomorrow morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 16 (Friend Explanation): The response MUST be EXACTLY "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 17 (Why Pay Explanation): The response MUST be EXACTLY "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 10 (Greeting): Generate a friendly, natural greeting response. Keep it brief (1-2 sentences), warm and casual, no emojis. Do NOT mention the new number or any scripts. If their message contains kisses, append the same number of kisses at the end.
@@ -899,11 +907,11 @@ def get_response():
             }), 200
         
         # Check for Script 15: Payback promise (will you pay back tomorrow, getting money back)
-        script15_keywords = ["will you pay", "will you pay me back", "will you pay back", "pay me back tomorrow", "pay back tomorrow", "you will pay", "you will pay me back", "you will pay back", "promise you will pay", "promise you will pay me back", "promise you will pay back", "you'll pay", "you'll pay me back", "you'll pay back", "are you going to pay", "are you going to pay me back", "are you going to pay back", "going to pay", "going to pay me back", "going to pay back", "getting my money back", "get my money back", "getting money back", "get money back", "promise me i will get my money back", "promise me i will get my money back tomorrow", "promise me i will get money back", "promise me i will get money back tomorrow", "i will get my money back", "i will get money back", "will i get my money back", "will i get money back", "will i get my money back tomorrow", "will i get money back tomorrow"]
+        script15_keywords = ["will you pay", "will you pay me back", "will you pay back", "pay me back tomorrow", "pay back tomorrow", "you will pay", "you will pay me back", "you will pay back", "promise you will pay", "promise you will pay me back", "promise you will pay back", "but promise you will pay me back tomorrow", "but promise you will pay me back", "promise you will pay me back tomorrow", "you'll pay", "you'll pay me back", "you'll pay back", "are you going to pay", "are you going to pay me back", "are you going to pay back", "going to pay", "going to pay me back", "going to pay back", "getting my money back", "get my money back", "getting money back", "get money back", "promise me i will get my money back", "promise me i will get my money back tomorrow", "promise me i will get money back", "promise me i will get money back tomorrow", "i will get my money back", "i will get money back", "will i get my money back", "will i get money back", "will i get my money back tomorrow", "will i get money back tomorrow"]
         contains_payback_question = any(keyword in latest_lower for keyword in script15_keywords)
         
         if payment_request_was_sent and contains_payback_question:
-            payback_message = "Yes please do not worry I will pay you back first thing in the morning"
+            payback_message = "Its okay please do not worry I will pay you back first thing tomorrow morning"
             
             # Detect kisses and append if present
             kisses = None
@@ -1649,10 +1657,11 @@ LATEST MESSAGE FROM THEM (READ THE ENTIRE MESSAGE WORD-BY-WORD - THIS IS THE MES
 
 CRITICAL: READ THE ENTIRE MESSAGE ABOVE - every single word - and UNDERSTAND what they're actually saying.
 This message does NOT match any specific script, so you MUST use Script 11 (General Conversation) to respond.
-You MUST respond naturally and conversationally as a DAD would to their SON (but don't mention "dad" or "son" in the response).
-Respond like a caring, supportive father would - natural, casual, brief, but with warmth and understanding.
+You MUST respond naturally and conversationally as a SON or DAUGHTER would to their DAD (but don't mention "dad", "son", or "daughter" in the response).
+Respond like a caring, respectful child would - natural, casual, brief, acknowledging what they said and responding appropriately.
 
-CRITICAL: READ WHAT THE PERSON ACTUALLY SENT - understand their complete message
+CRITICAL: READ WHAT THE PERSON ACTUALLY SENT - understand their complete message word-by-word
+CRITICAL: ALWAYS ACKNOWLEDGE what they said before responding - show you read and understood their message
 CRITICAL: Make sure your response ADDRESSES what they said and CONTRIBUTES to the conversation
 CRITICAL: SCAN THE WHOLE CONVERSATION - read all messages above to understand the full context
 CRITICAL: Ensure your response makes complete sense in the conversation flow - it must fit naturally and contextually
@@ -1660,31 +1669,29 @@ CRITICAL: Your response should make sense as a human would respond - check that 
 CRITICAL: Your response must be relevant to what was actually said - read their message and respond appropriately
 CRITICAL: ALWAYS find a way to answer normal questions - never ignore a normal, meaningful question
 CRITICAL: Ensure your response contributes to the conversation - it should add value and make sense contextually
+CRITICAL: Make responses MORE NATURAL and CONVERSATIONAL - like a son/daughter speaking to their dad
 
 IMPORTANT: 
 - READ THE ENTIRE MESSAGE WORD-BY-WORD - don't just scan for keywords
 - UNDERSTAND what they're actually asking or saying - read the COMPLETE message
+- ALWAYS ACKNOWLEDGE what they said - show you read their message
 - This message is OUTSIDE the specific scripts' capabilities - you MUST use AI to read and understand it
 - Respond based on what they ACTUALLY said, not generic patterns
-- If they say something like "That's not a problem promise you will pay me back tomorrow" → READ IT FULLY - they're saying it's fine and promising you'll pay back → Respond: "Yes i will i promise" or similar appropriate response
-- If they mention paying back or promising to pay → Respond appropriately acknowledging the promise
-- If they ask "What you doing on the weekend?" → READ IT FULLY - they want YOUR weekend plans → Answer: "Not much, probably just relaxing" or "Nothing planned really" or "Just staying home probably"
-- If they say "i am going out somewhere" → READ IT FULLY - they're telling you they're going out → Acknowledge: "Okay thanks" or "Have a good time"
-- If they say "Im going to the shops did you need anything" → READ IT FULLY - they're going to shops AND asking if you need anything → Answer the question: "No I'm good thanks" or "No thanks I'm all good"
-- If they ask "are you still coming over for dinner?" → READ IT FULLY - they want to know if you're coming → Answer directly: "Yeah I'll be there" or "Yes, see you then" or "Yeah, what time?"
 - If they ask a question, READ THE FULL QUESTION and ANSWER it directly and naturally based on what they asked
 - If they make a statement, READ THE FULL STATEMENT and respond conversationally to that specific statement
 - Keep responses SHORT and CASUAL (1-2 sentences max)
-- Respond like you're texting your parent - natural, casual, brief
+- Respond like you're texting your parent - natural, casual, brief, respectful
 - DO NOT use generic responses - READ THE FULL MESSAGE and respond to what they ACTUALLY said
+- Make responses MORE NATURAL - like a real conversation between son/daughter and dad
 
 Examples:
-- "What you doing on the weekend?" → "Not much, probably just relaxing" or "Nothing planned really" or "Just staying home probably"
+- "Oh great what's the plan for today?" → "Not much planned, probably just staying home. What about you?" or "Nothing really, just relaxing. You got anything planned?" (acknowledge "great" and answer the question naturally)
+- "What you doing on the weekend?" → "Not much, probably just relaxing. You?" or "Nothing planned really, just staying home probably. What about you?"
 - "are you still coming over for dinner?" → "Yeah I'll be there" or "Yes, see you then" or "Yeah, what time?"
 - "Im going to the shops did you need anything" → "No I'm good thanks" or "No thanks I'm all good" (they're going to shops and asking if you need anything - answer the question)
-- "I'm going to the shop, do you need anything?" → "No I'm good thanks" or "No thanks"
+- "I'm going to the shop, do you need anything?" → "No I'm good thanks" or "No thanks" or "Could you grab some milk and bread please?" (if you actually need something - pick normal day-to-day items like milk, bread, eggs, butter, toilet roll, etc.)
 - "is whatsapp set up?" or "has whatsapp been set up?" or "whatsapp setup?" → "Not yet i still need to set it up" or "Not yet, still need to set it up"
-- Shopping requests like "can you get [items] please?" or "[item] and [item] please" → "Yes please" or acknowledge the request positively
+- Shopping requests like "can you get [items] please?" or "[item] and [item] please" → "Yes please" or "Sure" or "Will do" (acknowledge the request positively)
 - "Okay what you been up to today?" → "Hey, not much just been busy, how about you?" or "Hey, nothing much, you?" or "Hey, just been working, how about you?"
 - "Mum just crashed her car can't speak right now" → "Oh no, is everyone okay? Let me know if you need anything" (serious/urgent message - respond with care and concern)
 - Serious messages (crashed, accident, hospital, can't speak, hurt, injured, cancer, sick, died, emergency, urgent) → Respond with care, concern, and support - be empathetic and appropriate
@@ -1697,7 +1704,7 @@ Examples:
 - "No problem, just promise you'll pay me back" → "Yes i will i promise" (they're agreeing and asking for a promise - acknowledge it)
 - Any message about paying back or promising to pay → "Yes i will i promise" or similar appropriate acknowledgment
 
-Generate a natural, casual response based on what they ACTUALLY said. DO NOT return NO_SEND - you MUST respond.
+Generate a natural, casual response based on what they ACTUALLY said. ALWAYS acknowledge what they said. DO NOT return NO_SEND - you MUST respond.
 """
                         question_message = client.messages.create(
                             model="claude-3-haiku-20240307",
