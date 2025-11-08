@@ -907,6 +907,75 @@ def get_response():
                         print(f"DEBUG: Extracted user name from previous message: '{user_name}'")
                         break
         
+        # Check for Script 3: "Why" question after "Dad save my new number"
+        # Check if previous message from "you" was "Dad save my new number"
+        previous_was_save_number = False
+        if parsed_turns:
+            for turn in reversed(parsed_turns):
+                role = (turn.get('role') or '').lower()
+                text = turn.get('text') or ''
+                if role == 'you' and text.strip():
+                    # Check if it's "Dad save my new number" or similar
+                    text_lower = text.lower()
+                    if "save my new number" in text_lower or "save my number" in text_lower:
+                        previous_was_save_number = True
+                    break
+        
+        # Check if current message asks "why" or similar questions about the new number
+        if previous_was_save_number and latest_msg:
+            latest_lower = latest_msg.lower()
+            why_keywords = ["why", "y", "reason", "what for"]
+            why_question_patterns = [
+                "why",
+                "why?",
+                "why did",
+                "why have",
+                "why do",
+                "why you",
+                "what for",
+                "what for?",
+                "reason",
+                "reason?"
+            ]
+            is_why_question = any(keyword in latest_lower for keyword in why_keywords) or \
+                             any(pattern in latest_lower for pattern in why_question_patterns)
+            
+            if is_why_question:
+                script3_message = "I've got a new plan with O2 and decided to keep the new number"
+                
+                # Detect kisses and append if present
+                kisses = None
+                if latest_msg:
+                    end_patterns = [
+                        r'([xX]{2,})\s*$',
+                        r'\s+([xX]{2,})\s*$',
+                        r'([xX]{2,})[\.\?\!]*\s*$',
+                    ]
+                    for pattern in end_patterns:
+                        end_match = re.search(pattern, latest_msg, re.MULTILINE)
+                        if end_match:
+                            kisses = end_match.group(1)
+                            break
+                    if not kisses:
+                        any_match = re.search(r'([xX]{2,})', latest_msg)
+                        if any_match:
+                            kisses = any_match.group(1)
+                
+                if kisses:
+                    script3_message = script3_message.rstrip() + " " + kisses
+                
+                # Remove trailing periods
+                script3_message = script3_message.rstrip()
+                while script3_message.endswith('.'):
+                    script3_message = script3_message[:-1].rstrip()
+                
+                return jsonify({
+                    "action": "SEND",
+                    "response": script3_message,
+                    "reasoning": "Script 3: Previous message was 'Dad save my new number' and current message asks why",
+                    "timestamp": datetime.now().isoformat()
+                }), 200
+        
         # Check for Script 9: Favour request after apologetic message about changing numbers
         # Check if previous message from "you" was an apologetic message about changing numbers
         previous_was_apologetic = False
