@@ -1502,108 +1502,11 @@ def get_response():
                 "timestamp": datetime.now().isoformat()
             }), 200
         
-        # DETECT general conversation questions BEFORE calling Claude so we can handle them properly
-        # These should ALWAYS get Script 11 responses (unless inappropriate)
-        has_name_and_question = False
-        is_general_question = False
-        if latest_msg:
-            msg_lower = latest_msg.lower()
-            
-            # Check for greeting + name pattern (Hello/Hi/Hey [Name])
-            name_greeting_pattern = re.search(r"\b(hello|hi|hey)\s+([A-Z][a-z]{2,})", latest_msg, re.IGNORECASE)
-            # Also check for name anywhere in message (capitalized word that's likely a name)
-            has_name = re.search(r"\b([A-Z][a-z]{2,})\b", latest_msg)
-            # Check for question words
-            has_question = re.search(r"\b(what|when|where|why|how|who|which|can|could|would|will|do|does|did|is|are|was|were)\s+", latest_msg, re.IGNORECASE)
-            # Check for question phrases (especially "what you been up to", "how are you", etc.)
-            # Improved regex to catch "what you been up to" more reliably
-            has_question_phrase = re.search(r"\b(what\s+(you|have|are|is|was|were|do|does|did)|what's|what\s+been|been\s+up|how\s+are|how's|how\s+you|what\s+you\s+been)", latest_msg, re.IGNORECASE)
-            
-            # Check for general conversation questions (with or without name)
-            # These patterns indicate general conversation that should always get a response
-            general_question_patterns = [
-                r"what\s+you\s+been\s+up",  # "what you been up to", "what you been up to today"
-                r"what\s+you\s+been\s+up\s+to",  # "what you been up to today"
-                r"what\s+you\s+been",  # "what you been"
-                r"what\s+you\s+doing",  # "what you doing"
-                r"how\s+are\s+you",  # "how are you"
-                r"how\s+you\s+doing",  # "how you doing"
-                r"how's\s+it\s+going",  # "how's it going"
-                r"what's\s+up",  # "what's up"
-                r"whats\s+up",  # "whats up"
-                r"how\s+you",  # "how you"
-                r"what\s+you",  # "what you"
-            ]
-            
-            # Also check for simple phrase matches (more flexible)
-            general_question_phrases = [
-                "what you been up to",
-                "what you been up",
-                "what you been",
-                "what you doing",
-                "how are you",
-                "how you doing",
-                "how's it going",
-                "hows it going",
-                "what's up",
-                "whats up",
-                "how you",
-                "what you"
-            ]
-            
-            for pattern in general_question_patterns:
-                if re.search(pattern, msg_lower, re.IGNORECASE):
-                    is_general_question = True
-                    print(f"DEBUG: General conversation question detected: '{latest_msg}' (pattern: {pattern})")
-                    break
-            
-            # If pattern matching didn't catch it, try phrase matching
-            if not is_general_question:
-                for phrase in general_question_phrases:
-                    if phrase in msg_lower:
-                        is_general_question = True
-                        print(f"DEBUG: General conversation question detected via phrase: '{latest_msg}' (phrase: {phrase})")
-                        break
-            
-            # If message has a name (greeting + name OR just a capitalized name) AND a question
-            if (name_greeting_pattern or has_name) and (has_question or has_question_phrase):
-                has_name_and_question = True
-                is_general_question = True
-                print(f"DEBUG: Name + question detected BEFORE Claude call: '{latest_msg}' (name_greeting={bool(name_greeting_pattern)}, has_name={bool(has_name)}, has_question={bool(has_question)}, has_question_phrase={bool(has_question_phrase)})")
-            
-            # Also check for common patterns like "hello [name] what you been up to" even if question detection is weak
-            if not has_name_and_question and name_greeting_pattern:
-                # Check for common question phrases that might not be caught by the regex
-                common_question_phrases = ["what you been", "what you", "how are", "how you", "what's up", "whats up", "how's it", "hows it", "what you been up to", "what you been up", "what you doing", "how you doing"]
-                if any(phrase in msg_lower for phrase in common_question_phrases):
-                    has_name_and_question = True
-                    is_general_question = True
-                    print(f"DEBUG: Name + question detected via common phrase pattern BEFORE Claude call: '{latest_msg}'")
-            
-            # Also check for questions that start with "okay", "ok", "alright", etc. followed by a question
-            # This catches messages like "Okay what you been up to today?"
-            if not is_general_question:
-                question_starters = r"^(okay|ok|alright|right|well|so|yeah|yep)\s+"
-                if re.search(question_starters, msg_lower, re.IGNORECASE):
-                    # If it starts with a question starter, check if it contains any question content
-                    # Remove the starter and check the rest
-                    rest_of_message = re.sub(question_starters, "", msg_lower, flags=re.IGNORECASE).strip()
-                    if (has_question or has_question_phrase or 
-                        any(phrase in rest_of_message for phrase in ["what you", "how you", "what's", "whats", "how's", "hows", "been up", "doing"])):
-                        is_general_question = True
-                        print(f"DEBUG: General question with starter detected: '{latest_msg}'")
-        
-        # Add user name context if detected
+        # SIMPLIFIED: Removed complex name/question detection - let Claude handle it naturally
+        # Add user name context if detected (for Claude's reference only)
         name_context = ""
         if user_name:
             name_context = f"\n\nCRITICAL: The user's name appears to be '{user_name}' (extracted from conversation). This is for CONTEXT ONLY - NEVER use the name in your response. NEVER say 'I'm {user_name}' or 'This is {user_name}' or include the name in any way. Responses should be natural and conversational WITHOUT using names.\n"
-        
-        # If it's a name+question or general question, add explicit instruction to Claude
-        if has_name_and_question or is_general_question:
-            if has_name_and_question:
-                name_context += f"\n\nCRITICAL: This message contains a name and a question (e.g., 'Hello [name] what you been up to?'). This MUST be classified as Script 11 (General Conversation) and you MUST respond with a natural, conversational AI-generated response. DO NOT return NO_SEND for this type of message.\n"
-            else:
-                name_context += f"\n\nCRITICAL: This is a general conversation question (e.g., 'what you been up to', 'how are you'). This MUST be classified as Script 11 (General Conversation) and you MUST respond with a natural, conversational AI-generated response. DO NOT return NO_SEND for this type of message unless it's inappropriate, swearing, rude, or questioning your identity.\n"
         
         user_message = f"""
 FULL CONVERSATION (READ ALL MESSAGES FOR CONTEXT):
@@ -1895,42 +1798,16 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
             # SIMPLIFIED: Remove complex violates_priority function - just allow all responses
             # Script matching is done before Claude call, so if we get here, the script is correct
 
-            # Special case: Informational statements should always get Script 11 responses
-            # Informational statements like "Your number is 07706829866" should always get Script 11 responses
-            is_informational = re.search(r"\b(your number is|i'm at|dinner is ready|i'm running|i'll be|here is|this is)", latest_msg.lower(), re.IGNORECASE)
-            
-            # has_name_and_question and is_general_question were already detected BEFORE Claude call above - reuse that detection
-            # Just verify it's still valid (in case latest_msg changed, though it shouldn't)
-            if not (has_name_and_question or is_general_question) and latest_msg:
-                # Re-check if somehow it wasn't detected before
-                name_greeting_pattern = re.search(r"\b(hello|hi|hey)\s+([A-Z][a-z]{2,})", latest_msg, re.IGNORECASE)
-                has_name = re.search(r"\b([A-Z][a-z]{2,})\b", latest_msg)
-                has_question = re.search(r"\b(what|when|where|why|how|who|which|can|could|would|will|do|does|did|is|are|was|were)\s+", latest_msg, re.IGNORECASE)
-                has_question_phrase = re.search(r"\b(what\s+(you|have|are|is|was|were|do|does|did)|what's|what\s+been|been\s+up|how\s+are|how's|how\s+you|what\s+you\s+been)", latest_msg, re.IGNORECASE)
-                if (name_greeting_pattern or has_name) and (has_question or has_question_phrase):
-                    has_name_and_question = True
-                    print(f"DEBUG: Name + question detected AFTER Claude call (fallback): '{latest_msg}'")
-                elif name_greeting_pattern:
-                    common_question_phrases = ["what you been", "what you", "how are", "how you", "what's up", "whats up", "how's it", "hows it", "what you been up to", "what you been up"]
-                    msg_lower = latest_msg.lower()
-                    if any(phrase in msg_lower for phrase in common_question_phrases):
-                        has_name_and_question = True
-                        print(f"DEBUG: Name + question detected via common phrase pattern AFTER Claude call (fallback): '{latest_msg}'")
-            
             # SIMPLIFIED: If Claude returned NO_SEND for a normal message, force Script 11 (general conversation)
             is_inappropriate_reasoning = "inappropriate" in decision_reasoning.lower() or "swear" in decision_reasoning.lower() or "profanity" in decision_reasoning.lower() or "sexual" in decision_reasoning.lower() or "time-wasting" in decision_reasoning.lower() or "uncooperative" in decision_reasoning.lower()
             
             # Force Script 11 if Claude said NO_SEND for a normal message (not inappropriate)
-            force_script11 = (decision_action == "NO_SEND" and not is_inappropriate_reasoning and latest_msg and len(latest_msg.strip()) > 0)
-            
-            if force_script11:
-                # SIMPLIFIED: Use natural fallback for Script 11 instead of complex AI call
+            if decision_action == "NO_SEND" and not is_inappropriate_reasoning and latest_msg and len(latest_msg.strip()) > 0:
                 print(f"DEBUG: Claude returned NO_SEND for normal message - forcing Script 11 (general conversation)")
                 decision_action = "SEND"
                 decision_response = generate_natural_fallback(latest_msg, "?" in latest_msg if latest_msg else False, False)
                 decision["reasoning"] = "Script 11: General conversation - natural response"
                 script_id = "script11"
-            # SIMPLIFIED: Removed violates_priority check - scripts are matched correctly before Claude call
 
         if decision_action == "SEND" and decision_response:
             # Recompute script_id if necessary (e.g., guard may have cleared it)
