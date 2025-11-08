@@ -37,6 +37,15 @@ CRITICAL: SCRIPT RESPONSES MUST BE EXACT
 - Script responses are FIXED TEXT - return them exactly as specified
 - Only Script 10 and Script 11 are AI-generated - all other scripts have exact text that must be used
 
+CRITICAL: NEVER INCLUDE NAMES IN RESPONSES
+- NEVER include any name (James, Katie, Charlie, etc.) in your responses
+- NEVER say "I'm [name]" or "This is [name]" or "I'm [name], your son" or similar
+- NEVER introduce yourself with a name
+- NEVER respond to "wrong person" or "wrong number" messages - these should be ignored (NO_SEND)
+- If someone says "wrong person" or "wrong number", do NOT respond at all - return NO_SEND
+- Responses should be natural and conversational WITHOUT using names
+- Even if they use your name in their message, do NOT use it back in your response
+
 STEP 1: Read the FULL conversation (all messages) - understand the complete context
 STEP 2: Read the ENTIRE latest message from them - understand the complete meaning word-by-word
 STEP 3: Analyze what they're ACTUALLY ASKING ABOUT or saying (read the whole message)
@@ -512,10 +521,11 @@ OUTPUT POLICY:
   - For informational messages: Always acknowledge them - never ignore informational statements
   - For messages with a name + question (like "Hello [name] what you been up to?"): They're calling you by name and asking a question - respond naturally as Script 11
     * Extract the name they use (e.g., "Hello Charlie" → name is "Charlie", "Hi Katie" → name is "Katie") - this is for context only
-    * DO NOT use the name in your response unless absolutely necessary (which will be rare)
+    * CRITICAL: NEVER use the name in your response - NEVER say "I'm [name]" or "This is [name]" or include the name in any way
     * "Hello [name] what you been up to?" → Natural response like "Hey, not much just been busy" or "Hey, nothing much, you?" or "Hey, just been working, how about you?" (NO name in response)
     * "Hi Katie, how are you?" → Natural response like "Hey, I'm good thanks, how are you?" (NO name in response)
     * These are general conversation - always respond with Script 11, but WITHOUT using the name
+    * NEVER respond to "wrong person" or "wrong number" - these should be ignored (NO_SEND)
   - CRITICAL: Read the actual message content and respond to what they said, not generically
   - CRITICAL: Generate ACTUAL responses, NOT placeholders or template text - if you need to suggest something, suggest a REAL thing
   - CRITICAL: Keep it natural and casual - respond like you're texting your parent, not writing a formal letter
@@ -714,6 +724,9 @@ def get_response():
                 "wrong number",
                 "you have the wrong number",
                 "this is the wrong number",
+                "wrong person",
+                "you have the wrong person",
+                "this is the wrong person",
                 "i don't know who you are",
                 "i dont know who you are",
                 "dont know who you are",
@@ -732,19 +745,24 @@ def get_response():
                 "unknown number",
                 "sorry wrong number",
                 "sorry you have the wrong number",
+                "sorry wrong person",
+                "sorry you have the wrong person",
                 "this isn't the right number",
-                "this isnt the right number"
+                "this isnt the right number",
+                "this isn't the right person",
+                "this isnt the right person"
             ]
-            # Only match if message contains "wrong number" or clearly indicates they don't recognize/know who this is
+            # Only match if message contains "wrong number" or "wrong person" or clearly indicates they don't recognize/know who this is
             # Exclude simple "who is this" which could be legitimate parent question
             is_wrong_number = (
                 "wrong number" in latest_lower or
+                "wrong person" in latest_lower or
                 ("don't know" in latest_lower and ("who you" in latest_lower or "who this" in latest_lower)) or
                 ("dont know" in latest_lower and ("who you" in latest_lower or "who this" in latest_lower)) or
                 ("don't recognize" in latest_lower or "dont recognize" in latest_lower) or
                 ("unfamiliar" in latest_lower and "number" in latest_lower) or
                 ("unknown" in latest_lower and "number" in latest_lower) or
-                ("sorry" in latest_lower and "wrong" in latest_lower)
+                ("sorry" in latest_lower and ("wrong" in latest_lower or "person" in latest_lower))
             )
             
             if is_wrong_number:
@@ -1457,7 +1475,7 @@ def get_response():
         # Add user name context if detected
         name_context = ""
         if user_name:
-            name_context = f"\n\nIMPORTANT: The user's name appears to be '{user_name}' (extracted from conversation). This is for context only - DO NOT use the name in your response unless it's absolutely necessary (which will be rare). Most responses should NOT include the name.\n"
+            name_context = f"\n\nCRITICAL: The user's name appears to be '{user_name}' (extracted from conversation). This is for CONTEXT ONLY - NEVER use the name in your response. NEVER say 'I'm {user_name}' or 'This is {user_name}' or include the name in any way. Responses should be natural and conversational WITHOUT using names.\n"
         
         # If it's a name+question or general question, add explicit instruction to Claude
         if has_name_and_question or is_general_question:
