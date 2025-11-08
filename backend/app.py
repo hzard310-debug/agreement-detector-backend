@@ -1,6 +1,7 @@
 # SMS Automation Backend - Agreement Detector API
 from flask import Flask, request, jsonify
 import anthropic
+from groq import Groq
 import os
 from datetime import datetime, timedelta
 import json
@@ -15,8 +16,66 @@ sent_tracker = {}
 # Initialize Claude client with API key from environment
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 if not CLAUDE_API_KEY:
-    print("ERROR: CLAUDE_API_KEY environment variable not set!")
-client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+    print("WARNING: CLAUDE_API_KEY environment variable not set! Will use Groq only.")
+    claude_client = None
+else:
+    claude_client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+
+# Initialize Groq client as fallback (no rate limits, fast)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    print("WARNING: GROQ_API_KEY environment variable not set! Will use Claude only.")
+    groq_client = None
+else:
+    groq_client = Groq(api_key=GROQ_API_KEY)
+
+def call_ai_with_fallback(system_prompt, user_message, max_tokens=350, model="claude-3-haiku-20240307"):
+    """
+    Call AI with fallback: Try Claude first, then Groq if Claude fails.
+    Returns the response text from whichever service succeeds.
+    """
+    # Try Claude first (better quality)
+    if claude_client:
+        try:
+            message = claude_client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": user_message}
+                ]
+            )
+            response_text = message.content[0].text
+            print("✓ Claude API call successful")
+            return response_text
+        except Exception as e:
+            print(f"⚠ Claude API failed: {str(e)} - Falling back to Groq")
+            # Fall through to Groq
+    
+    # Fallback to Groq (no rate limits, fast)
+    if groq_client:
+        try:
+            # Use Llama 3.1 70B for best quality, or Mixtral 8x7B for speed
+            groq_model = "llama-3.1-70b-versatile"  # Best quality
+            # Alternative: "mixtral-8x7b-32768" for faster responses
+            
+            chat_completion = groq_client.chat.completions.create(
+                model=groq_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                max_tokens=max_tokens,
+                temperature=0.7
+            )
+            response_text = chat_completion.choices[0].message.content
+            print("✓ Groq API call successful (fallback)")
+            return response_text
+        except Exception as e:
+            print(f"✗ Groq API also failed: {str(e)}")
+            raise Exception(f"Both Claude and Groq failed. Claude error: {str(e) if claude_client else 'Not configured'}, Groq error: {str(e)}")
+    else:
+        raise Exception("No AI service configured. Please set either CLAUDE_API_KEY or GROQ_API_KEY")
 
 # System prompt for the AI - INTELLIGENT CONVERSATION ANALYSIS
 SYSTEM_PROMPT = """You are an SMS automation assistant. Analyze conversations and pick the right response.
@@ -1574,17 +1633,8 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
 - Check that your response flows naturally from the conversation - it should make sense as a human would respond
 """
         
-        # Call Claude
-        message = client.messages.create(
-            model="claude-3-haiku-20240307",
-            max_tokens=350,
-            system=SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": user_message}
-            ]
-        )
-        
-        response_text = message.content[0].text
+        # Call AI (Claude first, then Groq fallback)
+        response_text = call_ai_with_fallback(SYSTEM_PROMPT, user_message, max_tokens=350)
         
         # Parse Claude's response
         import json
@@ -2098,15 +2148,7 @@ Examples:
 
 Generate a natural, casual response based on what they ACTUALLY said. ALWAYS acknowledge what they said. DO NOT return NO_SEND - you MUST respond.
 """
-                        question_message = client.messages.create(
-                            model="claude-3-haiku-20240307",
-                            max_tokens=200,
-                            system=SYSTEM_PROMPT,
-                            messages=[
-                                {"role": "user", "content": question_prompt}
-                            ]
-                        )
-                        question_response = question_message.content[0].text
+                        question_response = call_ai_with_fallback(SYSTEM_PROMPT, question_prompt, max_tokens=200)
                         
                         # Parse the response
                         if "{" in question_response and "}" in question_response:
@@ -2282,15 +2324,7 @@ Analyze the conversation and provide an ALTERNATIVE response.
 """
                         
                         try:
-                            alt_message = client.messages.create(
-                                model="claude-3-haiku-20240307",
-                                max_tokens=350,
-                                system=SYSTEM_PROMPT,
-                                messages=[
-                                    {"role": "user", "content": alt_user_message}
-                                ]
-                            )
-                            alt_response_text = alt_message.content[0].text
+                            alt_response_text = call_ai_with_fallback(SYSTEM_PROMPT, alt_user_message, max_tokens=350)
                             
                             # Parse alternative response
                             if "{" in alt_response_text and "}" in alt_response_text:
