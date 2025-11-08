@@ -526,6 +526,62 @@ OUTPUT POLICY:
 """
 
 @app.route('/respond', methods=['POST'])
+def generate_natural_fallback(message, has_question_mark, is_statement):
+    """Generate a natural fallback response when AI generation fails or returns empty response"""
+    if not message:
+        return "Thanks"
+    
+    msg_lower = message.lower()
+    
+    # Check for specific patterns and respond naturally
+    if has_question_mark:
+        # Questions - provide natural answers
+        if "what" in msg_lower and ("plan" in msg_lower or "doing" in msg_lower or "up to" in msg_lower):
+            return "Not much, just been busy. What about you?"
+        elif "how are you" in msg_lower or "how are" in msg_lower:
+            return "I'm good thanks, how are you?"
+        elif "where" in msg_lower:
+            return "Just at home, you?"
+        elif "when" in msg_lower:
+            return "Not sure yet, I'll let you know"
+        elif "why" in msg_lower:
+            return "Just been busy with things, nothing major"
+        elif "can you" in msg_lower or "could you" in msg_lower:
+            return "Sure, no problem"
+        elif "will you" in msg_lower or "are you" in msg_lower:
+            return "Yeah, I'll sort it"
+        elif "do you need" in msg_lower or "need anything" in msg_lower:
+            return "No I'm good thanks"
+        elif "what" in msg_lower:
+            return "Not much really, you?"
+        elif "how" in msg_lower:
+            return "All good thanks, how about you?"
+        else:
+            # Generic question response
+            return "Not much really, you?"
+    elif is_statement:
+        # Statements - acknowledge naturally
+        if "going" in msg_lower or "going to" in msg_lower:
+            return "Okay thanks"
+        elif "dinner" in msg_lower or "ready" in msg_lower:
+            return "Thanks, be there soon"
+        elif "at the" in msg_lower or "shop" in msg_lower:
+            return "Okay thanks"
+        elif "i'm" in msg_lower or "im " in msg_lower or "i am" in msg_lower:
+            return "Okay thanks"
+        elif "thanks" in msg_lower or "thank you" in msg_lower:
+            return "No problem"
+        elif "sorry" in msg_lower:
+            return "That's okay, no worries"
+        elif "okay" in msg_lower or "ok" in msg_lower:
+            return "Thanks"
+        else:
+            # Generic statement acknowledgment
+            return "Okay thanks"
+    else:
+        # Default natural response
+        return "Okay thanks"
+
 def get_response():
     """
     Receives conversation context and script, decides when to send it
@@ -1728,20 +1784,21 @@ Generate a natural, casual response based on what they ACTUALLY said. ALWAYS ack
                                 decision["reasoning"] = f"Script 11: {question_type} - AI-generated response"
                                 print(f"DEBUG: Generated Script 11 response for {question_type}: '{decision_response}'")
                             else:
-                                # Fallback to simple response
-                                decision_response = "Hey, not much just been busy"
-                                decision["reasoning"] = f"Script 11: {question_type} - forced response"
+                                # Fallback to natural response based on message type
+                                decision_response = generate_natural_fallback(latest_msg, has_question_mark, is_statement)
+                                decision["reasoning"] = f"Script 11: {question_type} - natural fallback response"
                         else:
-                            # Fallback to simple response
-                            decision_response = "Hey, not much just been busy"
-                            decision["reasoning"] = f"Script 11: {question_type} - forced response"
+                            # Fallback to natural response based on message type
+                            decision_response = generate_natural_fallback(latest_msg, has_question_mark, is_statement)
+                            decision["reasoning"] = f"Script 11: {question_type} - natural fallback response"
                     except Exception as e:
-                        print(f"DEBUG: Error generating {question_type} response: {e}, using fallback")
-                        decision_response = "Hey, not much just been busy"
-                        decision["reasoning"] = f"Script 11: {question_type} - forced response"
+                        print(f"DEBUG: Error generating {question_type} response: {e}, using natural fallback")
+                        decision_response = generate_natural_fallback(latest_msg, has_question_mark, is_statement)
+                        decision["reasoning"] = f"Script 11: {question_type} - natural fallback response"
                 else:
-                    decision_response = "Thanks"  # Simple acknowledgment for informational
-                    decision["reasoning"] = "Script 11: Informational statement - forced response"
+                    # Natural acknowledgment for informational statements
+                    decision_response = generate_natural_fallback(latest_msg, has_question_mark, is_statement)
+                    decision["reasoning"] = "Script 11: Informational statement - natural fallback response"
                 script_id = "script11"  # Set script_id to script11 for tracking (name+question, general questions, and informational are Script 11)
                 print(f"DEBUG: Forced Script 11 response for name+question/general question/informational, skipping violates_priority check")
             elif decision_action == "SEND" and decision_response and (is_informational or has_name_and_question or is_general_question):
