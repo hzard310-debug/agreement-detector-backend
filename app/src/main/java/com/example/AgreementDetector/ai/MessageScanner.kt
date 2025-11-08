@@ -831,10 +831,12 @@ object MessageScanner {
                                     }
                     } else {
                         Log.d(TAG, "Backend says NO_SEND for $address: action=$action, messageEmpty=${messageToSend.isEmpty()}, reasoning=$reasoning")
+                        Log.w(TAG, "⚠️ Backend returned NO_SEND - using fallback to ensure message is sent")
                             
                             // AI should respond to ALL questions naturally
                             val latestMessageLower = latestMessage.lowercase()
                             
+                            // ALWAYS generate fallback response if message has content
                             if (latestMessageLower.isNotEmpty()) {
                                 // Detect ANY question - anything with question mark or question words
                                 val isQuestion = latestMessageLower.contains("?") ||
@@ -915,23 +917,17 @@ object MessageScanner {
                                     shouldUseFallback = false
                                 }
                                 
-                                // Only use fallback if not already sent and not inappropriate
+                                // ALWAYS use fallback if message is not inappropriate and not already sent
+                                // This ensures we respond to ALL messages, even if backend says NO_SEND
                                 if (!alreadySent && !isInappropriate) {
+                                    shouldUseFallback = true
                                     if (isSeriousMessage) {
-                                        // Serious messages ALWAYS get a response - highest priority
-                                        shouldUseFallback = true
                                         Log.d(TAG, "Serious/urgent message detected - using fallback to respond with care")
                                     } else if (isQuestion) {
-                                        // ALL questions should get a response (unless inappropriate or already sent)
-                                        shouldUseFallback = true
                                         Log.d(TAG, "Question detected - using fallback to respond naturally")
                                     } else if (isCasualStatement) {
-                                        // Also respond to casual statements
-                                        shouldUseFallback = true
                                         Log.d(TAG, "Casual statement detected - using fallback to respond naturally")
-                } else {
-                                        // Respond to ALL other messages too (unless inappropriate or already sent)
-                                        shouldUseFallback = true
+                                    } else {
                                         Log.d(TAG, "Message detected - using fallback to respond naturally")
                                     }
                                 }
@@ -974,8 +970,13 @@ object MessageScanner {
                                     }
                                 }
                                 
+                                // ALWAYS use fallback when backend says NO_SEND (unless inappropriate or already sent)
+                                // This ensures we ALWAYS respond to detected messages
                                 if (shouldUseFallback) {
-                                    Log.d(TAG, "Generating natural AI response to question/statement")
+                                    Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                    Log.i(TAG, "🔄 GENERATING FALLBACK RESPONSE (backend said NO_SEND)")
+                                    Log.i(TAG, "  Message: ${latestMessage.take(50)}...")
+                                    Log.i(TAG, "  Reasoning: $reasoning")
                                     
                                     // Generate natural, varied responses based on the message
                                     val fallbackResponse = when {
@@ -1170,27 +1171,41 @@ object MessageScanner {
                                     if (fallbackResponse.isNotEmpty()) {
                                         try {
                                             AutoSendQueue.enqueue(context, address, fallbackResponse, AutoSendQueue.Source.AI, incomingMessageHash)
-                                            Log.i(TAG, "✓✓✓ Fallback response queued: $fallbackResponse")
-                                            return@use true
+                                            Log.i(TAG, "✓✓✓✓✓ FALLBACK RESPONSE QUEUED: '$fallbackResponse' to $address")
+                                            Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                                            notifyStatus("📨 Queued fallback response")
+                                            return@use true // SUCCESS - message queued
                                         } catch (e: Exception) {
-                                            Log.e(TAG, "Failed to queue fallback response: ${e.message}", e)
+                                            Log.e(TAG, "✗✗✗ FAILED TO QUEUE FALLBACK: ${e.message}", e)
                                             return@use false
                                         }
                                     } else {
-                                        // Fallback response was empty, continue
-                                        return@use false
-                                    }
-                                    } else {
-                                        // Not using fallback, continue
-                                        return@use false
+                                        // Fallback response was empty - generate a default response
+                                        Log.w(TAG, "Fallback response was empty - using default response")
+                                        val defaultResponse = "Okay thanks"
+                                        try {
+                                            AutoSendQueue.enqueue(context, address, defaultResponse, AutoSendQueue.Source.AI, incomingMessageHash)
+                                            Log.i(TAG, "✓✓✓ Default response queued: $defaultResponse")
+                                            return@use true
+                                        } catch (e: Exception) {
+                                            Log.e(TAG, "Failed to queue default response: ${e.message}", e)
+                                            return@use false
+                                        }
                                     }
                                 } else {
-                                    // Latest message is empty, continue
+                                    // Not using fallback (inappropriate or already sent) - but still log
+                                    Log.d(TAG, "Not using fallback - message inappropriate or already sent")
                                     return@use false
                                 }
-                                
-                                    // Request succeeded (even if NO_SEND), no retry needed
-                                    return@use false
+                            } else {
+                                // Latest message is empty - can't respond
+                                Log.w(TAG, "Latest message is empty - cannot generate response")
+                                return@use false
+                            }
+                            
+                            // Should never reach here, but just in case
+                            Log.w(TAG, "Unexpected code path - no response generated")
+                            return@use false
                     }
                 } else {
                                 // Consume error body to prevent resource leak
@@ -1307,21 +1322,45 @@ object MessageScanner {
                         Thread.sleep(delayMs)
                         // Continue loop to retry
                     } else {
-                        // Not retryable or max retries reached
-                        Log.e(TAG, "  → Max retries reached or non-retryable error - giving up")
+                        // Not retryable or max retries reached - use fallback response
+                        Log.e(TAG, "  → Max retries reached - using fallback response")
                         lastException = e
+                        // Generate fallback response for timeout
+                        val fallbackResponse = generateFallbackResponse(latestMessage, turns)
+                        if (fallbackResponse != null) {
+                            try {
+                                AutoSendQueue.enqueue(context, address, fallbackResponse, AutoSendQueue.Source.AI, incomingMessageHash)
+                                Log.i(TAG, "✓✓✓ FALLBACK RESPONSE QUEUED (backend timeout): '$fallbackResponse' to $address")
+                                notifyStatus("📨 Queued fallback response (backend timeout)")
+                                return true
+                            } catch (e2: Exception) {
+                                Log.e(TAG, "Failed to queue fallback response: ${e2.message}", e2)
+                            }
+                        }
                         break // Exit retry loop
                     }
                 }
             }
             
-            // If we exhausted retries, return false
+            // If we exhausted retries, try fallback response
             if (retryCount > maxRetries && lastException != null) {
                 Log.e(TAG, "Max retries ($maxRetries) exceeded for $address: ${lastException?.message}")
+                Log.w(TAG, "Using fallback response due to backend timeout/error")
+                val fallbackResponse = generateFallbackResponse(latestMessage, turns)
+                if (fallbackResponse != null) {
+                    try {
+                        AutoSendQueue.enqueue(context, address, fallbackResponse, AutoSendQueue.Source.AI, incomingMessageHash)
+                        Log.i(TAG, "✓✓✓ FALLBACK RESPONSE QUEUED (max retries): '$fallbackResponse' to $address")
+                        notifyStatus("📨 Queued fallback response (max retries)")
+                        return true
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Failed to queue fallback response: ${e2.message}", e2)
+                    }
+                }
                 return false
             }
         } catch (e: Exception) {
-            // Check if it's a timeout exception - log but don't fail completely
+            // Check if it's a timeout exception - use fallback response
             val isTimeout = e is java.net.SocketTimeoutException || 
                           e is java.net.ConnectException ||
                           e.message?.contains("timeout", ignoreCase = true) == true ||
@@ -1329,12 +1368,78 @@ object MessageScanner {
             
             if (isTimeout) {
                 Log.w(TAG, "Timeout exception checking if should respond for $address: ${e.message}")
-                // Don't retry on timeout - backend is likely overloaded, skip this message
+                Log.w(TAG, "Using fallback response due to timeout")
+                val fallbackResponse = generateFallbackResponse(latestMessage, turns)
+                if (fallbackResponse != null) {
+                    try {
+                        AutoSendQueue.enqueue(context, address, fallbackResponse, AutoSendQueue.Source.AI, incomingMessageHash)
+                        Log.i(TAG, "✓✓✓ FALLBACK RESPONSE QUEUED (timeout exception): '$fallbackResponse' to $address")
+                        notifyStatus("📨 Queued fallback response (timeout)")
+                        return true
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Failed to queue fallback response: ${e2.message}", e2)
+                    }
+                }
             } else {
                 Log.e(TAG, "Error checking if should respond for $address: ${e.message}", e)
             }
         }
         return false
+    }
+    
+    /**
+     * Generate a fallback response when backend times out or fails
+     */
+    private fun generateFallbackResponse(latestMessage: String, turns: List<Map<String, String>>): String? {
+        val lower = latestMessage.lowercase().trim()
+        
+        // "Who's this" questions
+        val isWhoQuestion = (lower.contains("who") && 
+                           (lower.contains("this") || 
+                            lower.contains("'s") || 
+                            lower.contains("whos") ||
+                            lower.trim() == "who" ||
+                            lower.trim() == "who?")) &&
+                           !lower.contains("is this") &&
+                           !lower.matches(Regex(".*is this [a-z]+.*", RegexOption.IGNORE_CASE)) &&
+                           !lower.contains("person") &&
+                           !lower.contains("guy") &&
+                           !lower.contains("man") &&
+                           !lower.contains("woman") &&
+                           !lower.contains("lady")
+        
+        if (isWhoQuestion) {
+            return "Your eldest and favourite"
+        }
+        
+        // Questions - respond naturally
+        val isQuestion = lower.contains("?") ||
+                        lower.contains("what") ||
+                        lower.contains("how") ||
+                        lower.contains("when") ||
+                        lower.contains("where") ||
+                        lower.contains("why") ||
+                        lower.contains("who") ||
+                        lower.contains("which") ||
+                        lower.contains("did you") ||
+                        lower.contains("do you") ||
+                        lower.contains("have you") ||
+                        lower.contains("are you") ||
+                        lower.contains("will you") ||
+                        lower.contains("can you")
+        
+        if (isQuestion) {
+            return when {
+                lower.contains("how are you") || lower.contains("how you doing") -> "I'm good thanks, how are you?"
+                lower.contains("what you doing") && lower.contains("weekend") -> "Not much, probably just relaxing"
+                lower.contains("what you doing") -> "Not much really"
+                lower.contains("what you been up to") -> "Hey, not much just been busy. How about you?"
+                else -> "I'm not sure, I'll check and let you know"
+            }
+        }
+        
+        // Statements - acknowledge
+        return "Okay thanks"
     }
     
     /**
