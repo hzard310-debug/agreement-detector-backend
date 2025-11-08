@@ -525,7 +525,6 @@ OUTPUT POLICY:
 - NEVER use placeholders like [suggested meal idea], [food], [time], etc. - always generate actual, specific responses
 """
 
-@app.route('/respond', methods=['POST'])
 def generate_natural_fallback(message, has_question_mark, is_statement):
     """Generate a natural fallback response when AI generation fails or returns empty response"""
     if not message:
