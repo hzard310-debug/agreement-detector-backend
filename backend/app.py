@@ -720,37 +720,29 @@ def get_response():
             latest_lower = latest_msg.lower()
             
             wrong_number_keywords = [
-                "think you have the wrong number",
-                "wrong number",
-                "you have the wrong number",
-                "this is the wrong number",
-                "wrong person",
-                "you have the wrong person",
-                "this is the wrong person",
-                "i don't know who you are",
-                "i dont know who you are",
-                "dont know who you are",
-                "don't know who you are",
-                "i don't know you",
-                "i dont know you",
-                "dont know you",
-                "don't know you",
-                "i don't recognize this number",
-                "i dont recognize this number",
-                "dont recognize this number",
-                "don't recognize this number",
-                "not sure who this is",
-                "not sure who you are",
-                "unfamiliar number",
-                "unknown number",
-                "sorry wrong number",
-                "sorry you have the wrong number",
-                "sorry wrong person",
-                "sorry you have the wrong person",
-                "this isn't the right number",
-                "this isnt the right number",
-                "this isn't the right person",
-                "this isnt the right person"
+                "think you have the wrong number", "think you have the rong number", "think you have the wrong numbr",
+                "wrong number", "rong number", "wrong numbr", "rong numbr", "wrong numbar", "rong numbar",
+                "you have the wrong number", "you have the rong number", "you have the wrong numbr",
+                "this is the wrong number", "this is the rong number", "this is the wrong numbr",
+                "wrong person", "rong person", "wrong persn", "rong persn",
+                "you have the wrong person", "you have the rong person", "you have the wrong persn",
+                "this is the wrong person", "this is the rong person", "this is the wrong persn",
+                "i don't know who you are", "i dont know who you are", "i dont no who you are",
+                "dont know who you are", "don't know who you are", "dont no who you are",
+                "i don't know you", "i dont know you", "i dont no you",
+                "dont know you", "don't know you", "dont no you",
+                "i don't recognize this number", "i dont recognize this number", "i dont reconize this number",
+                "dont recognize this number", "don't recognize this number", "dont reconize this number",
+                "not sure who this is", "not shure who this is", "not sure who this iz",
+                "not sure who you are", "not shure who you are", "not sure who you ar",
+                "unfamiliar number", "unfamiliar numbr", "unfamilar number",
+                "unknown number", "unknown numbr", "unkown number",
+                "sorry wrong number", "sorry rong number", "sory wrong number", "sorry wrong numbr",
+                "sorry you have the wrong number", "sorry you have the rong number",
+                "sorry wrong person", "sorry rong person", "sory wrong person", "sorry wrong persn",
+                "sorry you have the wrong person", "sorry you have the rong person",
+                "this isn't the right number", "this isnt the right number", "this isnt the rite number",
+                "this isn't the right person", "this isnt the right person", "this isnt the rite person"
             ]
             # Only match if message contains "wrong number" or "wrong person" or clearly indicates they don't recognize/know who this is
             # Exclude simple "who is this" which could be legitimate parent question
@@ -773,26 +765,41 @@ def get_response():
                     "timestamp": datetime.now().isoformat()
                 }), 200
             
-            # Check for messages indicating disbelief in relationship (they don't think we're their son/daughter)
+            # Check for messages indicating disbelief in relationship (they don't think we're their son/daughter) + typos
             disbelief_keywords = [
-                "my dead child", "dead child", "my child is dead", "child is dead",
-                "you're not my", "you are not my", "not my son", "not my daughter",
-                "not my child", "don't have a son", "don't have a daughter", "don't have a child",
-                "i don't have a son", "i don't have a daughter", "i don't have a child",
-                "who is this really", "who are you really", "this is a scam", "this is scam",
-                "scammer", "scam", "fraud", "fake", "liar", "lying", "you're lying",
-                "you are lying", "this is fake", "not my kid", "not my kids",
-                "go away im not dad", "go away im not ur dad", "go away im not your dad",
-                "go away i'm not dad", "go away i'm not ur dad", "go away i'm not your dad",
-                "im not dad", "i'm not dad", "im not ur dad", "i'm not ur dad",
-                "im not your dad", "i'm not your dad", "im not your dad!", "i'm not your dad!",
-                "not dad", "not ur dad", "not your dad", "not your dad!",
-                "go away", "leave me alone", "stop messaging", "stop texting",
-                "wrong son", "wrong daughter", "wrong child", "not my son", "not my daughter",
-                "my children are estranged", "children are estranged", "estranged for many years",
-                "forgotten their names", "i've forgotten their names", "i have forgotten their names",
-                "dont think we are", "don't think we are", "dont think you are", "don't think you are",
-                "i'm not your", "im not your", "i am not your", "i'm not ur", "im not ur"
+                "my dead child", "my ded child", "my dead chld", "dead child", "ded child", "dead chld",
+                "my child is dead", "my chld is dead", "my child iz dead", "child is dead", "chld is dead", "child iz dead",
+                "you're not my", "your not my", "youre not my", "ur not my", "you are not my", "you ar not my",
+                "not my son", "not my sn", "not my daughter", "not my daugter", "not my daugter",
+                "not my child", "not my chld", "don't have a son", "dont have a son", "dont hav a son",
+                "don't have a daughter", "dont have a daughter", "dont hav a daughter", "don't have a child", "dont have a child", "dont hav a child",
+                "i don't have a son", "i dont have a son", "i dont hav a son", "i don't have a daughter", "i dont have a daughter", "i dont hav a daughter",
+                "i don't have a child", "i dont have a child", "i dont hav a child",
+                "who is this really", "who iz this really", "who is this realy", "who are you really", "who ar you really", "who are u really",
+                "this is a scam", "this iz a scam", "this is a scamm", "this is scam", "this iz scam",
+                "scammer", "scamer", "scammr", "scam", "scamm", "fraud", "fraud", "fake", "fak", "liar", "lyar", "lying", "lyng",
+                "you're lying", "your lying", "youre lying", "ur lying", "you are lying", "you ar lying",
+                "this is fake", "this iz fake", "this is fak", "not my kid", "not my kd", "not my kids", "not my kds",
+                "go away im not dad", "go away im not ur dad", "go away im not your dad", "go away im not youre dad",
+                "go away i'm not dad", "go away i'm not ur dad", "go away i'm not your dad", "go away i'm not youre dad",
+                "im not dad", "i'm not dad", "im not ur dad", "i'm not ur dad", "im not youre dad", "i'm not youre dad",
+                "im not your dad", "i'm not your dad", "im not youre dad", "i'm not youre dad",
+                "im not your dad!", "i'm not your dad!", "im not youre dad!", "i'm not youre dad!",
+                "not dad", "not ur dad", "not your dad", "not youre dad", "not your dad!", "not youre dad!",
+                "go away", "go awy", "goa way", "leave me alone", "leave me alon", "leav me alone",
+                "stop messaging", "stop messagng", "stop texting", "stop txting", "stop txtng",
+                "wrong son", "rong son", "wrong sn", "wrong daughter", "rong daughter", "wrong daugter",
+                "wrong child", "rong child", "wrong chld", "not my son", "not my sn", "not my daughter", "not my daugter",
+                "my children are estranged", "my chldren are estranged", "my children ar estranged",
+                "children are estranged", "chldren are estranged", "children ar estranged",
+                "estranged for many years", "estranged for meny years", "estranged for many yers",
+                "forgotten their names", "forgoten their names", "forgotten ther names",
+                "i've forgotten their names", "ive forgotten their names", "i've forgotn their names",
+                "i have forgotten their names", "i hav forgotten their names", "i have forgotn their names",
+                "dont think we are", "don't think we are", "dont thnk we are", "dont think we ar",
+                "dont think you are", "don't think you are", "dont thnk you are", "dont think you ar",
+                "i'm not your", "im not your", "im not youre", "i am not your", "i am not youre",
+                "i'm not ur", "im not ur", "i'm not youre", "im not youre"
             ]
             # Also check for patterns like "im not your dad" or "i'm not your dad" (with or without punctuation)
             is_disbelief = any(keyword in latest_lower for keyword in disbelief_keywords) or \
@@ -808,22 +815,56 @@ def get_response():
                     "timestamp": datetime.now().isoformat()
                 }), 200
             
-            # Check for rude/inappropriate messages (enhanced with more profanity and insults)
-            rude_keywords = [
-                "fuck", "fuck off", "fuck you", "fucking", "fucked", "fuck off", "fuck off!",
-                "shit", "damn", "bitch", "bastard",
-                "piss off", "piss", "crap", "hell", "asshole", "dick", "cock", "pussy",
-                "cunt", "wanker", "twat", "tosser", "bellend", "arse", "arsehole",
-                "scamming", "scammer", "stupid scamming", "get fucked", "go get fucked",
-                "scammer", "scam", "fraud", "fake", "liar", "lying", "you're lying",
-                "you are lying", "this is fake", "this is a scam", "you're a scammer",
-                "you are a scammer", "fuck off scammer", "fuck off you scammer",
-                "stupid", "idiot", "moron", "dumb", "dumbass", "retard"
+            # Check for messages explicitly rejecting contact - ignore these completely
+            no_contact_keywords = [
+                "no longer want any contact", "no longer want contact", "dont want contact", "don't want contact",
+                "no contact", "no contact with you", "dont want any contact", "don't want any contact",
+                "i told you i no longer want", "i told you i dont want", "i told you i don't want",
+                "i no longer want", "i dont want contact", "i don't want contact", "i dont want any contact",
+                "i don't want any contact", "stop contacting", "stop contact", "dont contact", "don't contact",
+                "never contact", "never contact me", "dont contact me", "don't contact me"
             ]
-            # Also check for patterns like "fuck off" or "scammer" as standalone phrases
+            is_no_contact = any(keyword in latest_lower for keyword in no_contact_keywords)
+            
+            if is_no_contact:
+                return jsonify({
+                    "action": "NO_SEND",
+                    "response": "",
+                    "reasoning": "Person explicitly said they don't want contact, ignoring",
+                    "timestamp": datetime.now().isoformat()
+                }), 200
+            
+            # Check for rude/inappropriate messages (enhanced with more profanity and insults + typos)
+            rude_keywords = [
+                "fuck", "fuk", "fuckk", "fukc", "fuck off", "fuk off", "fuck of", "fuk of", "fuckoff", "fukoff",
+                "fuck you", "fuk you", "fuck u", "fuk u", "fucking", "fuking", "fuckin", "fukin", "fucked", "fuked",
+                "fuck off!", "fuk off!", "fuck of!", "fuk of!",
+                "shit", "shitt", "shyt", "sht", "damn", "dam", "damm", "bitch", "bich", "bitchh", "bastard", "bastrd",
+                "piss off", "pis off", "piss of", "pis of", "piss", "pis", "crap", "crap", "hell", "hel", "hel",
+                "asshole", "ashole", "asshol", "ashol", "dick", "dik", "dikk", "cock", "cok", "cokk", "pussy", "pusy", "puss",
+                "cunt", "cnt", "cuntt", "wanker", "wankr", "wankr", "twat", "twatt", "tosser", "toser", "bellend", "belend",
+                "arse", "ars", "arsehole", "ashole", "ashol",
+                "scamming", "scaming", "scammng", "scammer", "scamer", "scammr", "scammr", "stupid scamming", "stupid scaming",
+                "get fucked", "get fuked", "get fuckd", "go get fucked", "go get fuked", "go get fuckd",
+                "scam", "scamm", "scam", "fraud", "fraud", "fraud", "fake", "fak", "fak", "liar", "liar", "lyar",
+                "lying", "lyng", "lying", "you're lying", "your lying", "youre lying", "ur lying",
+                "you are lying", "you ar lying", "you are lyng",
+                "this is fake", "this iz fake", "this is fak", "this iz fak",
+                "this is a scam", "this iz a scam", "this is a scamm", "this iz a scamm",
+                "you're a scammer", "your a scammer", "youre a scammer", "ur a scammer", "you're a scamer", "your a scamer",
+                "you are a scammer", "you ar a scammer", "you are a scamer", "you ar a scamer",
+                "fuck off scammer", "fuk off scammer", "fuck of scammer", "fuk of scammer", "fuckoff scammer", "fukoff scammer",
+                "fuck off you scammer", "fuk off you scammer", "fuck of you scammer", "fuk of you scammer",
+                "stupid", "stupd", "stupid", "idiot", "idot", "idiot", "moron", "moron", "moron", "dumb", "dum", "dumb",
+                "dumbass", "dumbas", "dumbass", "retard", "retrd", "retard",
+                "manky", "manky", "junky", "junkie", "junky", "whore", "whor", "whore", "hore", "who should still be in prison",
+                "should still be in prison", "should be in prison", "still be in prison", "in prison", "prison"
+            ]
+            # Also check for patterns like "fuck off" or "scammer" as standalone phrases (with typos)
             is_rude = any(keyword in latest_lower for keyword in rude_keywords) or \
-                     "fuck off" in latest_lower or \
-                     ("scammer" in latest_lower and ("fuck" in latest_lower or "off" in latest_lower))
+                     "fuck off" in latest_lower or "fuk off" in latest_lower or "fuck of" in latest_lower or "fuk of" in latest_lower or \
+                     ("scammer" in latest_lower or "scamer" in latest_lower or "scammr" in latest_lower) and \
+                     ("fuck" in latest_lower or "fuk" in latest_lower or "off" in latest_lower or "of" in latest_lower)
             
             if is_rude:
                 return jsonify({
