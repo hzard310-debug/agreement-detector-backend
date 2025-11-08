@@ -724,9 +724,9 @@ object MessageScanner {
             Log.d(TAG, "  Latest message: ${latestMessage.take(50)}...")
             
             val client = OkHttpClient.Builder()
-                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS) // Increased to 60s to handle slow backend
-                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS) // Increased to 30s for slow connections
-                .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS) // Increased to 60s for large payloads
+                .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS) // Increased to 120s - backend can take 60s+ (Render cold starts)
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS) // 30s for slow connections
+                .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS) // 60s for large payloads
                 .build()
             val turnsArray = JSONArray()
             for (turn in turns) {
@@ -1232,18 +1232,31 @@ object MessageScanner {
                     val attemptDuration = System.currentTimeMillis() - attemptStartTime
                     val totalDuration = System.currentTimeMillis() - requestStartTime
                     
-                    // Identify specific timeout type
+                    // Identify specific timeout type based on exception and duration
                     val timeoutType = when {
                         e is java.net.SocketTimeoutException -> {
                             when {
                                 e.message?.contains("connect", ignoreCase = true) == true -> "CONNECT_TIMEOUT (30s)"
                                 e.message?.contains("read", ignoreCase = true) == true -> "READ_TIMEOUT (60s)"
                                 e.message?.contains("write", ignoreCase = true) == true -> "WRITE_TIMEOUT (60s)"
-                                else -> "UNKNOWN_TIMEOUT"
+                                // Use duration to determine timeout type if message is generic
+                                attemptDuration >= 115000 && attemptDuration <= 125000 -> "READ_TIMEOUT (120s) - Backend taking too long to respond"
+                                attemptDuration >= 55000 && attemptDuration <= 65000 -> "READ_TIMEOUT (60s) - Backend taking too long (old timeout)"
+                                attemptDuration >= 25000 && attemptDuration <= 35000 -> "CONNECT_TIMEOUT (30s) - Can't connect to server"
+                                attemptDuration < 5000 -> "WRITE_TIMEOUT (60s) - Can't send request"
+                                else -> "UNKNOWN_TIMEOUT (duration: ${attemptDuration}ms)"
                             }
                         }
-                        e is java.net.ConnectException -> "CONNECTION_ERROR"
-                        e.message?.contains("timeout", ignoreCase = true) == true -> "TIMEOUT"
+                        e is java.net.ConnectException -> "CONNECTION_ERROR - No internet or server unreachable"
+                        e.message?.contains("timeout", ignoreCase = true) == true -> {
+                            // Use duration to determine which timeout
+                            when {
+                                attemptDuration >= 115000 && attemptDuration <= 125000 -> "READ_TIMEOUT (120s) - Backend taking too long"
+                                attemptDuration >= 55000 && attemptDuration <= 65000 -> "READ_TIMEOUT (60s) - Backend taking too long (old timeout)"
+                                attemptDuration >= 25000 && attemptDuration <= 35000 -> "CONNECT_TIMEOUT (30s) - Can't connect"
+                                else -> "TIMEOUT (duration: ${attemptDuration}ms)"
+                            }
+                        }
                         e.message?.contains("timed out", ignoreCase = true) == true -> "TIMED_OUT"
                         else -> "OTHER_ERROR"
                     }
@@ -1257,6 +1270,28 @@ object MessageScanner {
                     Log.e(TAG, "  Total duration: ${totalDuration}ms")
                     Log.e(TAG, "  Request body size: $requestBodySize bytes")
                     Log.e(TAG, "  Conversation turns: ${turns.size}")
+                    
+                    // Diagnostic information based on timeout type
+                    if (timeoutType.contains("READ_TIMEOUT")) {
+                        Log.w(TAG, "  🔍 DIAGNOSIS: Backend is taking >120s to respond")
+                        Log.w(TAG, "     Possible causes:")
+                        Log.w(TAG, "     - Render free tier cold start (server sleeping - can take 60s+)")
+                        Log.w(TAG, "     - Backend processing slowly (AI API delays)")
+                        Log.w(TAG, "     - Backend overloaded")
+                        Log.w(TAG, "     - Network latency")
+                        Log.w(TAG, "     NOTE: Timeout increased to 120s to handle Render cold starts")
+                    } else if (timeoutType.contains("CONNECT_TIMEOUT")) {
+                        Log.w(TAG, "  🔍 DIAGNOSIS: Can't connect to backend")
+                        Log.w(TAG, "     Possible causes:")
+                        Log.w(TAG, "     - No internet connection")
+                        Log.w(TAG, "     - Backend server down")
+                        Log.w(TAG, "     - Firewall blocking connection")
+                    } else if (timeoutType.contains("WRITE_TIMEOUT")) {
+                        Log.w(TAG, "  🔍 DIAGNOSIS: Can't send request")
+                        Log.w(TAG, "     Possible causes:")
+                        Log.w(TAG, "     - Request payload too large")
+                        Log.w(TAG, "     - Network upload speed too slow")
+                    }
                     
                     // Check if it's a timeout or connection error that we should retry
                     val isRetryable = e is java.net.SocketTimeoutException || 
