@@ -214,8 +214,13 @@ Script 10 AI-GENERATED (Greeting Response)
     - No emojis; keep it conversational
     - Do NOT mention the new number or any scripts unless they ask
 
+Script 18 (O2 Call Alert Response)
+  TRIGGER: O2 call alert messages containing "You missed a call" or "missed a call from" or "Call Alert from O2"
+  RESPONSE: "I cant call right now can you message me?"
+  KEYWORDS: "missed a call", "call alert", "o2", "you missed a call from", "missed a call from me"
+
 Script 11 AI-GENERATED (General Conversation - ALL MESSAGES)
-  TRIGGER: ANY message that doesn't match Scripts 1-10 - this includes EVERYTHING: requests, questions, statements, serious news, updates, informational messages, etc.
+  TRIGGER: ANY message that doesn't match Scripts 1-10, 12-18 - this includes EVERYTHING: requests, questions, statements, serious news, updates, informational messages, etc.
   CRITICAL: This is the DEFAULT script for ANY message that doesn't match Scripts 1-10. You MUST respond to everything appropriately.
   CRITICAL: READ THE ENTIRE MESSAGE - understand what they're saying, not just keywords
   CRITICAL: Informational statements (like "Your number is 07706829866", "I'm at the shop", "Dinner is ready", etc.) MUST get a response - acknowledge them naturally.
@@ -697,6 +702,120 @@ def get_response():
         # Build user message for Claude
         latest_msg = latest_inbound
         latest_norm = re.sub(r'[^a-z0-9 ]+', '', latest_msg.lower()) if latest_msg else ""
+        
+        # Check for "wrong number" messages - ignore these completely
+        # Only ignore if it clearly indicates they don't know who this is (wrong number scenario)
+        # NOT generic "who is this" questions which could be legitimate parent questions
+        if latest_msg:
+            latest_lower = latest_msg.lower()
+            
+            wrong_number_keywords = [
+                "think you have the wrong number",
+                "wrong number",
+                "you have the wrong number",
+                "this is the wrong number",
+                "i don't know who you are",
+                "i dont know who you are",
+                "dont know who you are",
+                "don't know who you are",
+                "i don't know you",
+                "i dont know you",
+                "dont know you",
+                "don't know you",
+                "i don't recognize this number",
+                "i dont recognize this number",
+                "dont recognize this number",
+                "don't recognize this number",
+                "not sure who this is",
+                "not sure who you are",
+                "unfamiliar number",
+                "unknown number",
+                "sorry wrong number",
+                "sorry you have the wrong number",
+                "this isn't the right number",
+                "this isnt the right number"
+            ]
+            # Only match if message contains "wrong number" or clearly indicates they don't recognize/know who this is
+            # Exclude simple "who is this" which could be legitimate parent question
+            is_wrong_number = (
+                "wrong number" in latest_lower or
+                ("don't know" in latest_lower and ("who you" in latest_lower or "who this" in latest_lower)) or
+                ("dont know" in latest_lower and ("who you" in latest_lower or "who this" in latest_lower)) or
+                ("don't recognize" in latest_lower or "dont recognize" in latest_lower) or
+                ("unfamiliar" in latest_lower and "number" in latest_lower) or
+                ("unknown" in latest_lower and "number" in latest_lower) or
+                ("sorry" in latest_lower and "wrong" in latest_lower)
+            )
+            
+            if is_wrong_number:
+                return jsonify({
+                    "action": "NO_SEND",
+                    "response": "",
+                    "reasoning": "Wrong number - person doesn't know who this is, ignoring",
+                    "timestamp": datetime.now().isoformat()
+                }), 200
+            
+            # Check for messages indicating disbelief in relationship (they don't think we're their son/daughter)
+            disbelief_keywords = [
+                "my dead child", "dead child", "my child is dead", "child is dead",
+                "you're not my", "you are not my", "not my son", "not my daughter",
+                "not my child", "don't have a son", "don't have a daughter", "don't have a child",
+                "i don't have a son", "i don't have a daughter", "i don't have a child",
+                "who is this really", "who are you really", "this is a scam", "this is scam",
+                "scammer", "scam", "fraud", "fake", "liar", "lying", "you're lying",
+                "you are lying", "this is fake", "not my kid", "not my kids"
+            ]
+            is_disbelief = any(keyword in latest_lower for keyword in disbelief_keywords)
+            
+            if is_disbelief:
+                return jsonify({
+                    "action": "NO_SEND",
+                    "response": "",
+                    "reasoning": "Person doesn't believe we are their son/daughter, ignoring",
+                    "timestamp": datetime.now().isoformat()
+                }), 200
+            
+            # Check for rude/inappropriate messages
+            rude_keywords = [
+                "fuck", "fuck off", "fuck you", "fucking", "shit", "damn", "bitch", "bastard",
+                "piss off", "piss", "crap", "hell", "asshole"
+            ]
+            is_rude = any(keyword in latest_lower for keyword in rude_keywords)
+            
+            if is_rude:
+                return jsonify({
+                    "action": "NO_SEND",
+                    "response": "",
+                    "reasoning": "Rude/inappropriate message, ignoring",
+                    "timestamp": datetime.now().isoformat()
+                }), 200
+            
+            # Skip messages that are just punctuation (like "?")
+            if re.match(r'^[?!.,;:]+$', latest_msg.strip()):
+                return jsonify({
+                    "action": "NO_SEND",
+                    "response": "",
+                    "reasoning": "Message is just punctuation, ignoring",
+                    "timestamp": datetime.now().isoformat()
+                }), 200
+            
+            # Check for O2 call alert messages - Script 18
+            o2_call_alert_keywords = [
+                "missed a call", "call alert", "you missed a call from", "missed a call from me",
+                "you missed a call", "missed a call"
+            ]
+            is_o2_call_alert = (
+                any(keyword in latest_lower for keyword in o2_call_alert_keywords) and
+                ("o2" in latest_lower or "call alert from o2" in latest_lower)
+            )
+            
+            if is_o2_call_alert:
+                return jsonify({
+                    "action": "SEND",
+                    "response": "I cant call right now can you message me?",
+                    "reasoning": "Script 18 - O2 call alert detected",
+                    "timestamp": datetime.now().isoformat()
+                }), 200
         
         # Extract user's name from conversation if they're being addressed by name
         # Look for patterns like "hello [name]", "hi [name]", "hey [name]", etc.
