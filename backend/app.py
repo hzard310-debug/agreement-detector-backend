@@ -1339,14 +1339,37 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
                 print(f"WARNING: Response validation failed: {validation_msg}. Forcing Script 11 to generate appropriate response.")
                 decision_action = "NO_SEND"  # Will trigger Script 11 fallback
         
+        # CRITICAL: Check if Script 11 was selected but wrong response was returned
+        # If reasoning says Script 11 but response is Script 1's text, force Script 11 to regenerate
+        is_script11_in_reasoning = False
+        if decision_action == "SEND" and decision_response:
+            is_script11_in_reasoning = (
+                "script 11" in decision_reasoning.lower() or 
+                "script11" in decision_reasoning.lower() or
+                "general conversation" in decision_reasoning.lower() or
+                ("script" in decision_reasoning.lower() and "11" in decision_reasoning)
+            )
+            
+            # Check if response is Script 1's text but reasoning says Script 11
+            response_is_script1 = "Your eldest and favourite" in decision_response
+            
+            if is_script11_in_reasoning and response_is_script1:
+                # Script 11 was selected but Script 1's response was returned - this is wrong
+                print(f"ERROR: Script 11 was selected but Script 1 response was returned. Forcing Script 11 to generate proper AI response.")
+                print(f"Reasoning: {decision_reasoning[:200]}")
+                print(f"Wrong response: {decision_response[:100]}")
+                decision_action = "NO_SEND"  # Will trigger Script 11 fallback to generate proper response
+                decision_response = ""
+        
         # CRITICAL: If Script 1 is detected (from reasoning or response), ALWAYS use exact script text
         if decision_action == "SEND" and decision_response:
             # Check if reasoning indicates Script 1 OR if response doesn't match Script 1 exactly
             is_script1 = (
-                "script 1" in decision_reasoning or 
-                "script1" in decision_reasoning or 
-                "generic 'who' question" in decision_reasoning or
-                ("who" in decision_reasoning and "script" in decision_reasoning and "1" in decision_reasoning)
+                ("script 1" in decision_reasoning.lower() or 
+                "script1" in decision_reasoning.lower() or 
+                "generic 'who' question" in decision_reasoning.lower() or
+                ("who" in decision_reasoning.lower() and "script" in decision_reasoning.lower() and "1" in decision_reasoning))
+                and not is_script11_in_reasoning  # Don't force Script 1 if Script 11 was selected
             )
             
             # Also check if response contains placeholders or doesn't match Script 1 exactly
