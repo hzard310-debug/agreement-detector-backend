@@ -261,9 +261,20 @@ class SmsProcessingService : Service() {
         val lowerBody = body.lowercase().trim()
         
         // CRITICAL: Check for "Who's this" or "Who is this" - should trigger Script 1
-        val isWhoQuestion = (lowerBody.contains("who") && (lowerBody.contains("this") || lowerBody.contains("is") || lowerBody.contains("'s"))) &&
+        // Match patterns like: "who's this", "whos this", "who is this", "who this", "who?", "who"
+        val isWhoQuestion = (lowerBody.contains("who") && 
+                           (lowerBody.contains("this") || 
+                            lowerBody.contains("'s") || 
+                            lowerBody.contains("whos") ||
+                            lowerBody.trim() == "who" ||
+                            lowerBody.trim() == "who?")) &&
                            !lowerBody.contains("is this") && // Exclude "is this [name]" which is Script 2
-                           !lowerBody.matches(Regex(".*is this [a-z]+.*", RegexOption.IGNORE_CASE)) // Exclude "is this [name]"
+                           !lowerBody.matches(Regex(".*is this [a-z]+.*", RegexOption.IGNORE_CASE)) && // Exclude "is this [name]"
+                           !lowerBody.contains("person") && // Exclude "who is this person" which might be Script 16
+                           !lowerBody.contains("guy") && // Exclude "who is this guy"
+                           !lowerBody.contains("man") && // Exclude "who is this man"
+                           !lowerBody.contains("woman") && // Exclude "who is this woman"
+                           !lowerBody.contains("lady") // Exclude "who is this lady"
         
         if (isWhoQuestion) {
             // Script 1: "Your eldest and favourite"
