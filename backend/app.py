@@ -838,10 +838,14 @@ def get_response():
             
             # Check for rude/inappropriate messages (enhanced with more profanity and insults + typos)
             rude_keywords = [
-                "fuck", "fuk", "fuckk", "fukc", "fuck off", "fuk off", "fuck of", "fuk of", "fuckoff", "fukoff",
-                "fuck you", "fuk you", "fuck u", "fuk u", "fucking", "fuking", "fuckin", "fukin", "fucked", "fuked",
-                "fuck off!", "fuk off!", "fuck of!", "fuk of!",
-                "shut the fuck up", "shut the fuk up", "shut up", "shutup", "shut the fuck", "shut the fuk",
+                "fuck", "fuk", "fuckk", "fukc", "fook", "fookk", "fok", "fokc", "fuc", "fuc", "fukc",
+                "fuck off", "fuk off", "fuck of", "fuk of", "fuckoff", "fukoff", "fook off", "fook of", "fookoff", "fookof",
+                "fok off", "fok of", "fokoff", "fokof", "fuc off", "fuc of", "fucoff", "fucof",
+                "fookofff", "fookoff", "fook of", "fookoff", "fook of", "fook off", "fookofff",
+                "fuck you", "fuk you", "fuck u", "fuk u", "fook you", "fook u", "fok you", "fok u",
+                "fucking", "fuking", "fuckin", "fukin", "fooked", "foked", "fucked", "fuked", "fookd", "fokd",
+                "fuck off!", "fuk off!", "fuck of!", "fuk of!", "fook off!", "fook of!", "fok off!", "fok of!",
+                "shut the fuck up", "shut the fuk up", "shut the fook up", "shut the fok up", "shut up", "shutup", "shut the fuck", "shut the fuk", "shut the fook", "shut the fok",
                 "shit", "shitt", "shyt", "sht", "damn", "dam", "damm", "bitch", "bich", "bitchh", "bastard", "bastrd",
                 "piss off", "pis off", "piss of", "pis of", "piss", "pis", "crap", "crap", "hell", "hel", "hel",
                 "asshole", "ashole", "asshol", "ashol", "dick", "dik", "dikk", "cock", "cok", "cokk", "pussy", "pusy", "puss",
@@ -867,10 +871,13 @@ def get_response():
                 "you're gay", "your gay", "youre gay", "ur gay", "you are gay", "you ar gay"
             ]
             # Also check for patterns like "fuck off" or "scammer" as standalone phrases (with typos)
+            # Check for "fuck off" variations (including typos like "fookofff", "fook off", etc.)
+            fuck_off_patterns = ["fuck off", "fuk off", "fuck of", "fuk of", "fook off", "fook of", "fok off", "fok of",
+                                "fookoff", "fookof", "fokoff", "fokof", "fucoff", "fucof", "fookofff", "fookofff"]
             is_rude = any(keyword in latest_lower for keyword in rude_keywords) or \
-                     "fuck off" in latest_lower or "fuk off" in latest_lower or "fuck of" in latest_lower or "fuk of" in latest_lower or \
+                     any(pattern in latest_lower for pattern in fuck_off_patterns) or \
                      ("scammer" in latest_lower or "scamer" in latest_lower or "scammr" in latest_lower) and \
-                     ("fuck" in latest_lower or "fuk" in latest_lower or "off" in latest_lower or "of" in latest_lower)
+                     ("fuck" in latest_lower or "fuk" in latest_lower or "fook" in latest_lower or "fok" in latest_lower or "off" in latest_lower or "of" in latest_lower)
             
             if is_rude:
                 return jsonify({
