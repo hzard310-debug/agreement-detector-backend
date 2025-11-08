@@ -159,27 +159,30 @@ object AutoSendQueue {
         }
         
         // Check for duplicate messages - check the actual SMS database to see if this exact text was already sent to this contact
+        // CRITICAL: Only check recent messages (last 24 hours) to avoid blocking legitimate responses
+        // Different incoming messages should be able to get the same response
         val t = text.ifBlank { "." } // avoid empty
         
-        // Query the SMS database to check if this exact message was already sent to this contact
+        // Query the SMS database to check if this exact message was already sent to this contact RECENTLY
         var alreadySent = false
         try {
+            val recentTime = System.currentTimeMillis() - 86400000L // Last 24 hours only
             appCtx.contentResolver.query(
                 android.provider.Telephony.Sms.Sent.CONTENT_URI,
-                arrayOf(android.provider.Telephony.Sms.BODY, android.provider.Telephony.Sms.ADDRESS),
-                null,
-                null,
+                arrayOf(android.provider.Telephony.Sms.BODY, android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.DATE),
+                "${android.provider.Telephony.Sms.DATE} > ?",
+                arrayOf(recentTime.toString()),
                 "${android.provider.Telephony.Sms.DATE} DESC"
             )?.use { cursor ->
                 while (cursor.moveToNext()) {
                     val sentBody = cursor.getString(0) ?: continue
                     val sentAddress = cursor.getString(1) ?: continue
                     
-                    // Check if this is the same contact and same message text
+                    // Check if this is the same contact and same message text (only within last 24 hours)
                     if (android.telephony.PhoneNumberUtils.compare(appCtx, address, sentAddress) && 
                         sentBody.trim() == t.trim()) {
                         alreadySent = true
-                        android.util.Log.d("AutoSendQueue", "Found duplicate in chat history: '$t' already sent to $address")
+                        android.util.Log.d("AutoSendQueue", "Found duplicate in recent chat history (last 24h): '$t' already sent to $address")
                         break
                     }
                 }
@@ -189,12 +192,14 @@ object AutoSendQueue {
         }
         
         if (alreadySent) {
-            android.util.Log.w("AutoSendQueue", "Duplicate message detected in chat history - not sending again: $t")
+            android.util.Log.w("AutoSendQueue", "Duplicate message detected in recent chat history (last 24h) - not sending again: $t")
             handler.post {
-                android.widget.Toast.makeText(appCtx, "Message already sent", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(appCtx, "Message already sent recently", android.widget.Toast.LENGTH_SHORT).show()
             }
             return
         }
+        
+        android.util.Log.d("AutoSendQueue", "No duplicate found - queuing message to $address: $t")
         
         ensureReceivers(appCtx)
         queue.add(Triple(address, t, incomingMessageHash))

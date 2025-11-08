@@ -280,6 +280,7 @@ class SmsProcessingService : Service() {
             // Script 1: "Your eldest and favourite"
             val response = "Your eldest and favourite"
             val incomingMessageHash = hashMessage(sender, body)
+            android.util.Log.d(TAG, "Fallback: Detected 'Who's this' question - queuing Script 1 response: $response")
             AutoSendQueue.enqueue(this, sender, response, AutoSendQueue.Source.AI, incomingMessageHash)
             android.util.Log.d(TAG, "Fallback: Script 1 response queued for 'Who's this' question: $response")
             return
