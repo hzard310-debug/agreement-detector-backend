@@ -358,17 +358,7 @@ class SmsProcessingService : Service() {
                     Log.e(TAG, "Error releasing wake lock: ${e.message}", e)
                 }
                 
-                // CRITICAL: After processing a new SMS, trigger a full scan of ALL messages
-                // This ensures we check ALL conversations for unresponded messages, not just the one that arrived
-                try {
-                    Log.i(TAG, "New SMS processed - triggering full scan of all messages")
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        com.example.agreementdetector.ai.MessageScanner.scanAllMessages(this@SmsProcessingService)
-                        Log.d(TAG, "Full scan triggered after new SMS processing")
-                    }, 2000L) // Wait 2 seconds to allow SMS to be saved to database
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error triggering full scan: ${e.message}", e)
-                }
+                // REMOVED: Full scan feature - only process new incoming messages
             }
         }.start()
     }

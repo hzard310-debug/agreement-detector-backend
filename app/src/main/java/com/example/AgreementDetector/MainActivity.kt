@@ -63,22 +63,13 @@ class MainActivity : AppCompatActivity() {
         requestPermissionsIfNeeded()
         requestBatteryOptimizationExemption()
         
-        // REMOVED: AI enabled check - always start service and scan messages automatically
         // Start foreground service to keep app alive when screen is locked
         SmsProcessingService.start(this)
-        // Delay scan slightly to let app initialize
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            com.example.agreementdetector.ai.MessageScanner.scanAllMessages(this)
-        }, 2000)
     }
     
     override fun onResume() {
         super.onResume()
-        // REMOVED: AI enabled check - always scan messages automatically
-        // Delay slightly to avoid scanning too frequently
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            com.example.agreementdetector.ai.MessageScanner.scanAllMessages(this)
-        }, 1000)
+        // No scanning - only process new incoming messages
     }
 
     private fun requestPermissionsIfNeeded() {

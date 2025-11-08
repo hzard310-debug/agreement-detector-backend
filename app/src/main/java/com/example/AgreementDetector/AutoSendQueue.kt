@@ -241,15 +241,7 @@ object AutoSendQueue {
                 android.util.Log.i("AutoSendQueue", "Queue empty - stopping drain, all messages processed")
             }
             notifyProgress()
-            // All messages have been sent - now trigger a rescan for NEW messages only
-            // Record the timestamp when messages finished sending
-            val sendCompleteTimestamp = System.currentTimeMillis()
-            // Delay by 2 seconds to allow SMS to be saved to database first
-            Handler(Looper.getMainLooper()).postDelayed({
-                android.util.Log.d("AutoSendQueue", "All messages sent successfully - scanning for NEW messages received after send completion")
-                // Only scan for messages received AFTER we finished sending
-                MessageScanner.scanAllMessages(context.applicationContext, sinceTimestamp = sendCompleteTimestamp)
-            }, 2000L)
+            // REMOVED: Full scan feature - only process new incoming messages
             return
         }
         val (address, text, incomingMessageHash) = item
