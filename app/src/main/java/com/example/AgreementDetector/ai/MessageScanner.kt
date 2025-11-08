@@ -3,6 +3,8 @@ package com.example.agreementdetector.ai
 import android.content.Context
 import android.content.Intent
 import android.app.PendingIntent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.PowerManager
 import android.provider.Telephony
 import android.telephony.SmsManager
@@ -415,7 +417,7 @@ object MessageScanner {
                         )
                         
                         // Found the message to respond to - stop checking older messages
-                        break
+                            break
                     }
                     
                     // Add message to processing list if found
@@ -423,7 +425,7 @@ object MessageScanner {
                         unrespondedMessagesToProcess.add(messageToRespondTo)
                         Log.i(TAG, "✓ Added message from $canonicalAddress to processing queue")
                         Log.i(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    } else {
+                        } else {
                         if (ourMostRecentSentDate > 0) {
                             Log.d(TAG, "No messages found from $canonicalAddress AFTER our most recent message (date: $ourMostRecentSentDate)")
                         } else {
@@ -712,6 +714,15 @@ object MessageScanner {
     ): Boolean {
         try {
             val url = "https://agreement-detector-api.onrender.com/respond"
+            
+            // Log request details for debugging
+            val requestStartTime = System.currentTimeMillis()
+            Log.d(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            Log.d(TAG, "📤 STARTING BACKEND REQUEST for $address")
+            Log.d(TAG, "  URL: $url")
+            Log.d(TAG, "  Conversation turns: ${turns.size}")
+            Log.d(TAG, "  Latest message: ${latestMessage.take(50)}...")
+            
             val client = OkHttpClient.Builder()
                 .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS) // Increased to 60s to handle slow backend
                 .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS) // Increased to 30s for slow connections
@@ -736,10 +747,33 @@ object MessageScanner {
                 }
             }.toString()
             
+            // Log request payload size
+            val requestBodySize = requestBody.length
+            Log.d(TAG, "  Request body size: $requestBodySize bytes (${requestBodySize / 1024} KB)")
+            if (requestBodySize > 100000) {
+                Log.w(TAG, "  ⚠️ WARNING: Large request payload (${requestBodySize / 1024} KB) - may cause timeout")
+            }
+            
             val request = Request.Builder()
                 .url(url)
                 .post(RequestBody.create("application/json".toMediaType(), requestBody))
                 .build()
+            
+            // Check network connectivity
+            try {
+                val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                val network = connectivityManager?.activeNetwork
+                val capabilities = connectivityManager?.getNetworkCapabilities(network)
+                val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                val hasWifi = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                val hasCellular = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
+                Log.d(TAG, "  Network status: Internet=$hasInternet, WiFi=$hasWifi, Cellular=$hasCellular")
+                if (!hasInternet) {
+                    Log.w(TAG, "  ⚠️ WARNING: No internet connection detected!")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "  Could not check network status: ${e.message}")
+            }
             
             // Retry logic for 502 Bad Gateway and timeouts (up to 3 retries)
             var lastException: Exception? = null
@@ -749,11 +783,19 @@ object MessageScanner {
             var result = false
             while (retryCount <= maxRetries) {
                 var shouldRetry = false
+                val attemptStartTime = System.currentTimeMillis()
                 try {
+                    Log.d(TAG, "  Attempt ${retryCount + 1}/${maxRetries + 1}: Connecting to backend...")
                     val responseResult = client.newCall(request).execute().use { response ->
+                        val connectTime = System.currentTimeMillis() - attemptStartTime
+                        Log.d(TAG, "  ✓ Connected in ${connectTime}ms, reading response...")
                         try {
                 if (response.isSuccessful) {
+                                val readStartTime = System.currentTimeMillis()
                                 val body = response.body?.string()
+                                val readTime = System.currentTimeMillis() - readStartTime
+                                val totalTime = System.currentTimeMillis() - attemptStartTime
+                                
                                 if (body == null) {
                                     // Body is null, ensure it's closed
                                     try {
@@ -766,13 +808,20 @@ object MessageScanner {
                     val messageToSend = json.getString("response")
                     val reasoning = json.optString("reasoning", "")
                     
-                    Log.d(TAG, "Backend response for $address: action=$action, messageLength=${messageToSend.length}, reasoning=$reasoning")
+                    Log.d(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    Log.d(TAG, "✓ BACKEND RESPONSE RECEIVED for $address")
+                    Log.d(TAG, "  Connect time: ${connectTime}ms")
+                    Log.d(TAG, "  Read time: ${readTime}ms")
+                    Log.d(TAG, "  Total time: ${totalTime}ms")
+                    Log.d(TAG, "  Action: $action")
+                    Log.d(TAG, "  Response length: ${messageToSend.length} chars")
+                    Log.d(TAG, "  Reasoning: ${reasoning.take(100)}...")
                     
-                                if (action == "SEND" && messageToSend.isNotEmpty()) {
-                                    Log.d(TAG, "Backend says SEND for $address: $messageToSend")
+                    if (action == "SEND" && messageToSend.isNotEmpty()) {
+                        Log.d(TAG, "Backend says SEND for $address: $messageToSend")
                                     // AI chose the response - queue it for sending (reliable method)
                                     try {
-                                        AutoSendQueue.enqueue(context, address, messageToSend, AutoSendQueue.Source.AI, incomingMessageHash)
+                        AutoSendQueue.enqueue(context, address, messageToSend, AutoSendQueue.Source.AI, incomingMessageHash)
                                         Log.i(TAG, "✓✓✓ MESSAGE QUEUED FOR SENDING: '$messageToSend' to $address (hash: $incomingMessageHash)")
                                         notifyStatus("📨 Queued message to ${address.takeLast(4)}")
                                         return@use true
@@ -780,8 +829,8 @@ object MessageScanner {
                                         Log.e(TAG, "✗ FAILED TO QUEUE MESSAGE: Error queuing '$messageToSend' to $address: ${e.message}", e)
                                         return@use false
                                     }
-                                } else {
-                                    Log.d(TAG, "Backend says NO_SEND for $address: action=$action, messageEmpty=${messageToSend.isEmpty()}, reasoning=$reasoning")
+                    } else {
+                        Log.d(TAG, "Backend says NO_SEND for $address: action=$action, messageEmpty=${messageToSend.isEmpty()}, reasoning=$reasoning")
                             
                             // AI should respond to ALL questions naturally
                             val latestMessageLower = latestMessage.lowercase()
@@ -880,7 +929,7 @@ object MessageScanner {
                                         // Also respond to casual statements
                                         shouldUseFallback = true
                                         Log.d(TAG, "Casual statement detected - using fallback to respond naturally")
-                                    } else {
+                } else {
                                         // Respond to ALL other messages too (unless inappropriate or already sent)
                                         shouldUseFallback = true
                                         Log.d(TAG, "Message detected - using fallback to respond naturally")
@@ -919,7 +968,7 @@ object MessageScanner {
                                         AutoSendQueue.enqueue(context, address, macbookResponse, AutoSendQueue.Source.AI, incomingMessageHash)
                                         Log.i(TAG, "✓✓✓ Payment paragraph question - message queued: $macbookResponse")
                                         return@use true
-                                    } catch (e: Exception) {
+        } catch (e: Exception) {
                                         Log.e(TAG, "Failed to queue macbook response: ${e.message}", e)
                                         return@use false
                                     }
@@ -1176,10 +1225,39 @@ object MessageScanner {
                     if (!shouldRetry) {
                         result = responseResult
                         if (result) return true
-                        return false
+        return false
                     }
                     // Otherwise continue loop to retry
                 } catch (e: Exception) {
+                    val attemptDuration = System.currentTimeMillis() - attemptStartTime
+                    val totalDuration = System.currentTimeMillis() - requestStartTime
+                    
+                    // Identify specific timeout type
+                    val timeoutType = when {
+                        e is java.net.SocketTimeoutException -> {
+                            when {
+                                e.message?.contains("connect", ignoreCase = true) == true -> "CONNECT_TIMEOUT (30s)"
+                                e.message?.contains("read", ignoreCase = true) == true -> "READ_TIMEOUT (60s)"
+                                e.message?.contains("write", ignoreCase = true) == true -> "WRITE_TIMEOUT (60s)"
+                                else -> "UNKNOWN_TIMEOUT"
+                            }
+                        }
+                        e is java.net.ConnectException -> "CONNECTION_ERROR"
+                        e.message?.contains("timeout", ignoreCase = true) == true -> "TIMEOUT"
+                        e.message?.contains("timed out", ignoreCase = true) == true -> "TIMED_OUT"
+                        else -> "OTHER_ERROR"
+                    }
+                    
+                    Log.e(TAG, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    Log.e(TAG, "✗ REQUEST FAILED for $address")
+                    Log.e(TAG, "  Error type: ${e.javaClass.simpleName}")
+                    Log.e(TAG, "  Timeout type: $timeoutType")
+                    Log.e(TAG, "  Error message: ${e.message}")
+                    Log.e(TAG, "  Attempt duration: ${attemptDuration}ms")
+                    Log.e(TAG, "  Total duration: ${totalDuration}ms")
+                    Log.e(TAG, "  Request body size: $requestBodySize bytes")
+                    Log.e(TAG, "  Conversation turns: ${turns.size}")
+                    
                     // Check if it's a timeout or connection error that we should retry
                     val isRetryable = e is java.net.SocketTimeoutException || 
                                     e is java.net.ConnectException ||
@@ -1189,12 +1267,13 @@ object MessageScanner {
                     if (isRetryable && retryCount < maxRetries) {
                         retryCount++
                         val delayMs = (1000L * (1 shl retryCount)).coerceAtMost(10000L) // Max 10s delay
-                        Log.w(TAG, "Request failed for $address (${e.message}) - retrying in ${delayMs}ms (attempt $retryCount/$maxRetries)")
+                        Log.w(TAG, "  → Retrying in ${delayMs}ms (attempt $retryCount/$maxRetries)")
                         lastException = e
                         Thread.sleep(delayMs)
                         // Continue loop to retry
                     } else {
                         // Not retryable or max retries reached
+                        Log.e(TAG, "  → Max retries reached or non-retryable error - giving up")
                         lastException = e
                         break // Exit retry loop
                     }
