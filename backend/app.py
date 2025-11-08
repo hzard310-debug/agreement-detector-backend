@@ -808,20 +808,28 @@ def get_response():
                     "timestamp": datetime.now().isoformat()
                 }), 200
             
-            # Check for rude/inappropriate messages (enhanced with more profanity)
+            # Check for rude/inappropriate messages (enhanced with more profanity and insults)
             rude_keywords = [
-                "fuck", "fuck off", "fuck you", "fucking", "shit", "damn", "bitch", "bastard",
+                "fuck", "fuck off", "fuck you", "fucking", "fucked", "fuck off", "fuck off!",
+                "shit", "damn", "bitch", "bastard",
                 "piss off", "piss", "crap", "hell", "asshole", "dick", "cock", "pussy",
                 "cunt", "wanker", "twat", "tosser", "bellend", "arse", "arsehole",
-                "scamming", "scammer", "stupid scamming", "get fucked", "go get fucked"
+                "scamming", "scammer", "stupid scamming", "get fucked", "go get fucked",
+                "scammer", "scam", "fraud", "fake", "liar", "lying", "you're lying",
+                "you are lying", "this is fake", "this is a scam", "you're a scammer",
+                "you are a scammer", "fuck off scammer", "fuck off you scammer",
+                "stupid", "idiot", "moron", "dumb", "dumbass", "retard"
             ]
-            is_rude = any(keyword in latest_lower for keyword in rude_keywords)
+            # Also check for patterns like "fuck off" or "scammer" as standalone phrases
+            is_rude = any(keyword in latest_lower for keyword in rude_keywords) or \
+                     "fuck off" in latest_lower or \
+                     ("scammer" in latest_lower and ("fuck" in latest_lower or "off" in latest_lower))
             
             if is_rude:
                 return jsonify({
                     "action": "NO_SEND",
                     "response": "",
-                    "reasoning": "inappropriate content - contains swear words/profanity - ignore and delete",
+                    "reasoning": "inappropriate content - contains swear words/profanity/rude language - ignore and delete",
                     "timestamp": datetime.now().isoformat()
                 }), 200
             
