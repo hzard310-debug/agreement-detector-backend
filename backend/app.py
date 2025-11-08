@@ -216,8 +216,8 @@ Script 10 AI-GENERATED (Greeting Response)
 
 Script 18 (O2 Call Alert Response)
   TRIGGER: O2 call alert messages containing "You missed a call" or "missed a call from" or "Call Alert from O2"
-  RESPONSE: "I cant call right now can you message me?"
-  KEYWORDS: "missed a call", "call alert", "o2", "you missed a call from", "missed a call from me"
+  RESPONSE: "I cant call right now can you message?"
+  KEYWORDS: "missed a call", "call alert", "o2", "you missed a call from", "missed a call from me", "you missed a call from me at"
 
 Script 11 AI-GENERATED (General Conversation - ALL MESSAGES)
   TRIGGER: ANY message that doesn't match Scripts 1-10, 12-18 - this includes EVERYTHING: requests, questions, statements, serious news, updates, informational messages, etc.
@@ -802,17 +802,17 @@ def get_response():
             # Check for O2 call alert messages - Script 18
             o2_call_alert_keywords = [
                 "missed a call", "call alert", "you missed a call from", "missed a call from me",
-                "you missed a call", "missed a call"
+                "you missed a call", "missed a call", "you missed a call from me at"
             ]
             is_o2_call_alert = (
                 any(keyword in latest_lower for keyword in o2_call_alert_keywords) and
-                ("o2" in latest_lower or "call alert from o2" in latest_lower)
+                ("o2" in latest_lower or "call alert from o2" in latest_lower or "this is a free call alert from o2" in latest_lower)
             )
             
             if is_o2_call_alert:
                 return jsonify({
                     "action": "SEND",
-                    "response": "I cant call right now can you message me?",
+                    "response": "I cant call right now can you message?",
                     "reasoning": "Script 18 - O2 call alert detected",
                     "timestamp": datetime.now().isoformat()
                 }), 200
