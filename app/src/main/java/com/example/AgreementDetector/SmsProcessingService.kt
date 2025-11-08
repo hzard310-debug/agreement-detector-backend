@@ -8,7 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import okhttp3.MediaType.Companion.toMediaType
@@ -21,6 +23,9 @@ class SmsProcessingService : Service() {
         const val EXTRA_SMS_SENDER = "sms_sender"
         const val EXTRA_SMS_BODY = "sms_body"
         const val ACTION_PROCESS_SMS = "com.example.agreementdetector.PROCESS_SMS"
+        
+        // Keep-alive interval: ping backend every 5 minutes to prevent cold starts
+        private const val KEEP_ALIVE_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
         
         fun start(context: Context) {
             val intent = Intent(context, SmsProcessingService::class.java)
@@ -73,6 +78,73 @@ class SmsProcessingService : Service() {
                 Log.e(TAG, "Failed to start foreground: ${e2.message}", e2)
             }
         }
+        
+        // Service will only process incoming SMS and respond
+        // Rescanning only happens when messages are sent (triggered by AutoSendQueue)
+        
+        // Start keep-alive mechanism to prevent backend from sleeping
+        startKeepAlive()
+    }
+    
+    private val keepAliveHandler = Handler(Looper.getMainLooper())
+    private var keepAliveRunnable: Runnable? = null
+    
+    private fun startKeepAlive() {
+        Log.d(TAG, "Starting keep-alive mechanism - pinging backend every 5 minutes")
+        keepAliveRunnable = object : Runnable {
+            override fun run() {
+                pingBackendHealth()
+                // Schedule next ping
+                keepAliveHandler.postDelayed(this, KEEP_ALIVE_INTERVAL_MS)
+            }
+        }
+        // Start immediately, then every 5 minutes
+        keepAliveHandler.post(keepAliveRunnable!!)
+    }
+    
+    private fun stopKeepAlive() {
+        keepAliveRunnable?.let {
+            keepAliveHandler.removeCallbacks(it)
+            keepAliveRunnable = null
+            Log.d(TAG, "Stopped keep-alive mechanism")
+        }
+    }
+    
+    private fun pingBackendHealth() {
+        Thread {
+            try {
+                val url = "https://agreement-detector-api.onrender.com/health"
+                val client = okhttp3.OkHttpClient.Builder()
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                
+                val request = okhttp3.Request.Builder()
+                    .url(url)
+                    .get()
+                    .build()
+                
+                val startTime = System.currentTimeMillis()
+                val response = client.newCall(request).execute()
+                val duration = System.currentTimeMillis() - startTime
+                
+                if (response.isSuccessful) {
+                    Log.d(TAG, "✓ Keep-alive ping successful (${duration}ms) - backend is awake")
+                } else {
+                    Log.w(TAG, "⚠ Keep-alive ping returned ${response.code} (${duration}ms)")
+                }
+                response.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "Keep-alive ping failed: ${e.message} (this is okay, backend might be sleeping)")
+            }
+        }.start()
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        stopKeepAlive()
+        Log.d(TAG, "SMS Processing Service destroyed")
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -98,6 +170,7 @@ class SmsProcessingService : Service() {
             val sender = intent.getStringExtra(EXTRA_SMS_SENDER)
             val body = intent.getStringExtra(EXTRA_SMS_BODY)
             if (sender != null && body != null) {
+                // Let AI backend decide what to ignore and what to send - no client-side filtering
                 Log.d(TAG, "Processing SMS from $sender in service (works even when screen is locked)")
                 processSmsInService(sender, body)
             }
@@ -105,6 +178,45 @@ class SmsProcessingService : Service() {
         
         // Return START_STICKY to restart service if killed
         return START_STICKY
+    }
+    
+    /**
+     * Check if message is a system/automated message that should be ignored
+     */
+    private fun isSystemMessage(messageText: String, address: String): Boolean {
+        val lower = messageText.lowercase().trim()
+        
+        // Check for automated/system messages (like service provider messages, etc.)
+        // Multiple patterns to catch various system message formats
+        val hasConfigureAndNumber = lower.contains("configure") && (lower.contains("number") || lower.contains("sms url") || lower.contains("url"))
+        val hasSmsUrl = lower.contains("sms url")
+        val hasReplyCommands = lower.contains("reply help") || lower.contains("reply stop") || lower.contains("reply stop to unsubscribe")
+        val hasUnsubscribe = lower.contains("unsubscribe")
+        val hasDataRates = lower.contains("msg&data rates") || lower.contains("msg and data rates") || lower.contains("data rates may apply")
+        val hasThanksAndConfigure = lower.contains("thanks for the message") && (lower.contains("configure") || lower.contains("url"))
+        val hasBalance = lower.contains("balance") || lower.contains("top up") || lower.contains("call 4444") || lower.contains("your balance")
+        
+        val isSystemMessage = hasBalance ||
+                              hasConfigureAndNumber ||
+                              hasSmsUrl ||
+                              hasReplyCommands ||
+                              hasUnsubscribe ||
+                              hasDataRates ||
+                              hasThanksAndConfigure ||
+                              address.equals("O2UK", ignoreCase = true) ||
+                              address.matches(Regex("^[A-Z0-9]+$")) // All caps/numbers = likely system
+        
+        if (isSystemMessage) {
+            Log.i(TAG, "SYSTEM MESSAGE DETECTED - IGNORING: '$messageText' from $address")
+            Log.d(TAG, "  - hasConfigureAndNumber: $hasConfigureAndNumber")
+            Log.d(TAG, "  - hasSmsUrl: $hasSmsUrl")
+            Log.d(TAG, "  - hasReplyCommands: $hasReplyCommands")
+            Log.d(TAG, "  - hasUnsubscribe: $hasUnsubscribe")
+            Log.d(TAG, "  - hasDataRates: $hasDataRates")
+            Log.d(TAG, "  - hasThanksAndConfigure: $hasThanksAndConfigure")
+        }
+        
+        return isSystemMessage
     }
     
     private fun processSmsInService(sender: String, body: String) {
@@ -137,9 +249,9 @@ class SmsProcessingService : Service() {
                 // Call Claude backend with retry logic
                 val url = "https://agreement-detector-api.onrender.com/respond"
                 val client = okhttp3.OkHttpClient.Builder()
-                    .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                    .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS) // Increased to 120s to handle Render cold starts
+                    .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS) // 30s for slow connections
+                    .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS) // 60s for large payloads
                     .build()
                 val turnsArray = org.json.JSONArray()
                 for (turn in turnsWithCurrent) {
@@ -258,9 +370,9 @@ class SmsProcessingService : Service() {
     }
     
     private fun handleNoSendFallback(sender: String, body: String, reasoning: String, turnsWithCurrent: List<Map<String, String>>, prefs: android.content.SharedPreferences) {
-        val lowerBody = body.lowercase().trim()
-        
+        // Let AI backend decide what to ignore and what to send - no client-side filtering
         // CRITICAL: Check for "Who's this" or "Who is this" - should trigger Script 1
+        val lowerBody = body.lowercase().trim()
         // Match patterns like: "who's this", "whos this", "who is this", "who this", "who?", "who"
         val isWhoQuestion = (lowerBody.contains("who") && 
                            (lowerBody.contains("this") || 
