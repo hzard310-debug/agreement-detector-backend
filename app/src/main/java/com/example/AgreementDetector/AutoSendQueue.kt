@@ -14,12 +14,16 @@ import android.app.NotificationChannel
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import android.net.Uri
+import com.example.agreementdetector.ai.MessageScanner
 
 // Sends SMS one-by-one with a 5 second gap between messages.
 // ALL messages must come from AI - no manual sending allowed.
 object AutoSendQueue {
     enum class Source { AI } // Only AI source - manual removed
-    interface Listener { fun onQueueProgress(pending: Int) }
+    interface Listener { 
+        fun onQueueProgress(pending: Int)
+        fun onStatusUpdate(status: String)
+    }
 
     private val handler = Handler(Looper.getMainLooper())
     private val queue = ArrayDeque<Triple<String, String, String?>>() // address, text, incomingMessageHash (optional)
@@ -36,6 +40,10 @@ object AutoSendQueue {
         val pending = pendingCount()
         listeners.forEach { l -> handler.post { l.onQueueProgress(pending) } }
     }
+    
+    private fun notifyStatus(status: String) {
+        listeners.forEach { l -> handler.post { l.onStatusUpdate(status) } }
+    }
 
     private fun ensureReceivers(ctx: Context) {
         if (receiversRegistered) return
@@ -45,10 +53,15 @@ object AutoSendQueue {
         val sentReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 val rc = resultCode
+                val addr = intent.getStringExtra("addr")
+                val text = intent.getStringExtra("text")
                 val msg = when (rc) {
                     android.app.Activity.RESULT_OK -> {
+                        android.util.Log.i("AutoSendQueue", "✓✓✓✓✓ SMS SENT SUCCESSFULLY (CONFIRMED BY SYSTEM): '$text' to $addr")
+                        android.util.Log.i("AutoSendQueue", "✓✓✓✓✓ SYSTEM CONFIRMATION: Message was successfully sent to $addr")
+                        notifyStatus("✅ Message sent successfully")
+                        notifyProgress() // Update queue count after sending
                         // Track unique contacts
-                        val addr = intent.getStringExtra("addr")
                         if (addr != null) {
                             val prefs = appCtx.getSharedPreferences("settings", Context.MODE_PRIVATE)
                             val sentContacts = prefs.getStringSet("sent_contacts", null)?.toMutableSet() ?: mutableSetOf()
@@ -63,6 +76,9 @@ object AutoSendQueue {
                                 prefs.edit().putStringSet("responded_messages", respondedMessages).apply()
                                 android.util.Log.d("AutoSendQueue", "Marked incoming message as responded: $incomingMessageHash")
                             }
+                            
+                            // Don't trigger rescan here - wait until all messages in queue are sent
+                            // The rescan will be triggered in drain() when queue becomes empty
                             
                             // Update notification with count
                             val nm = appCtx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -84,11 +100,26 @@ object AutoSendQueue {
                         }
                         "SMS sent"
                     }
-                    SmsManager.RESULT_ERROR_GENERIC_FAILURE -> "SMS error: generic failure"
-                    SmsManager.RESULT_ERROR_NO_SERVICE -> "SMS error: no service"
-                    SmsManager.RESULT_ERROR_NULL_PDU -> "SMS error: null PDU"
-                    SmsManager.RESULT_ERROR_RADIO_OFF -> "SMS error: radio off"
-                    else -> "SMS send result: $rc"
+                    SmsManager.RESULT_ERROR_GENERIC_FAILURE -> {
+                        android.util.Log.e("AutoSendQueue", "✗✗ SMS SEND FAILED: Generic failure for '$text' to $addr")
+                        "SMS error: generic failure"
+                    }
+                    SmsManager.RESULT_ERROR_NO_SERVICE -> {
+                        android.util.Log.e("AutoSendQueue", "✗✗ SMS SEND FAILED: No service for '$text' to $addr")
+                        "SMS error: no service"
+                    }
+                    SmsManager.RESULT_ERROR_NULL_PDU -> {
+                        android.util.Log.e("AutoSendQueue", "✗✗ SMS SEND FAILED: Null PDU for '$text' to $addr")
+                        "SMS error: null PDU"
+                    }
+                    SmsManager.RESULT_ERROR_RADIO_OFF -> {
+                        android.util.Log.e("AutoSendQueue", "✗✗ SMS SEND FAILED: Radio off for '$text' to $addr")
+                        "SMS error: radio off"
+                    }
+                    else -> {
+                        android.util.Log.w("AutoSendQueue", "⚠ SMS SEND UNKNOWN RESULT: $rc for '$text' to $addr")
+                        "SMS send result: $rc"
+                    }
                 }
                 android.widget.Toast.makeText(appCtx, msg, android.widget.Toast.LENGTH_SHORT).show()
                 // Retry once with alternate SIM on generic failure
@@ -142,72 +173,38 @@ object AutoSendQueue {
     fun enqueue(context: Context, address: String, text: String, source: Source = Source.AI, incomingMessageHash: String? = null) {
         val appCtx = context.applicationContext
         
-        // ALL messages must come from AI - verify AI is enabled
-        val settings = appCtx.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        if (!settings.getBoolean("ai_response_enabled", false)) {
-            android.util.Log.w("AutoSendQueue", "AI response not enabled - blocking message send")
-            handler.post {
-                android.widget.Toast.makeText(appCtx, "AI must be enabled to send messages", android.widget.Toast.LENGTH_SHORT).show()
-            }
-            return
-        }
+        // REMOVED: AI check - no longer blocking messages
+        // REMOVED: Duplicate check - no longer blocking messages
+        // All messages will be sent immediately without any blocking checks
         
-        // Only accept AI source
-        if (source != Source.AI) {
-            android.util.Log.w("AutoSendQueue", "Only AI source allowed - blocking non-AI message")
-            return
-        }
-        
-        // Check for duplicate messages - check the actual SMS database to see if this exact text was already sent to this contact
-        // CRITICAL: Only check recent messages (last 24 hours) to avoid blocking legitimate responses
-        // Different incoming messages should be able to get the same response
         val t = text.ifBlank { "." } // avoid empty
         
-        // Query the SMS database to check if this exact message was already sent to this contact RECENTLY
-        var alreadySent = false
-        try {
-            val recentTime = System.currentTimeMillis() - 86400000L // Last 24 hours only
-            appCtx.contentResolver.query(
-                android.provider.Telephony.Sms.Sent.CONTENT_URI,
-                arrayOf(android.provider.Telephony.Sms.BODY, android.provider.Telephony.Sms.ADDRESS, android.provider.Telephony.Sms.DATE),
-                "${android.provider.Telephony.Sms.DATE} > ?",
-                arrayOf(recentTime.toString()),
-                "${android.provider.Telephony.Sms.DATE} DESC"
-            )?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val sentBody = cursor.getString(0) ?: continue
-                    val sentAddress = cursor.getString(1) ?: continue
-                    
-                    // Check if this is the same contact and same message text (only within last 24 hours)
-                    if (android.telephony.PhoneNumberUtils.compare(appCtx, address, sentAddress) && 
-                        sentBody.trim() == t.trim()) {
-                        alreadySent = true
-                        android.util.Log.d("AutoSendQueue", "Found duplicate in recent chat history (last 24h): '$t' already sent to $address")
-                        break
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("AutoSendQueue", "Error checking for duplicates: ${e.message}", e)
-        }
-        
-        if (alreadySent) {
-            android.util.Log.w("AutoSendQueue", "Duplicate message detected in recent chat history (last 24h) - not sending again: $t")
-            handler.post {
-                android.widget.Toast.makeText(appCtx, "Message already sent recently", android.widget.Toast.LENGTH_SHORT).show()
-            }
-            return
-        }
-        
-        android.util.Log.d("AutoSendQueue", "No duplicate found - queuing message to $address: $t")
+        android.util.Log.d("AutoSendQueue", "Queuing message to $address: $t (all blocking checks removed)")
         
         ensureReceivers(appCtx)
-        queue.add(Triple(address, t, incomingMessageHash))
+        synchronized(this) {
+            queue.add(Triple(address, t, incomingMessageHash))
+            android.util.Log.i("AutoSendQueue", "✓ Message added to queue: '$t' to $address (queue size: ${queue.size})")
+        }
+        notifyStatus("📤 Message queued (${queue.size} in queue)")
         notifyProgress()
-        if (!running) {
-            running = true
-            // Temporary: 2 second delay before first send
-            handler.postDelayed({ drain(appCtx) }, 2000L)
+        synchronized(this) {
+            if (!running) {
+                running = true
+                android.util.Log.i("AutoSendQueue", "Starting queue processor (queue size: ${queue.size})")
+                // Send immediately (no delay) to ensure messages are sent
+                handler.post { 
+                    android.util.Log.d("AutoSendQueue", "Handler posting drain() call - starting queue processor")
+                    drain(appCtx) 
+                }
+            } else {
+                android.util.Log.d("AutoSendQueue", "Queue processor already running (queue size: ${queue.size}) - ensuring drain will continue")
+                // Even if running, ensure drain is called to process new messages
+                handler.post { 
+                    android.util.Log.d("AutoSendQueue", "Handler posting drain() call - queue processor already running, continuing")
+                    drain(appCtx) 
+                }
+            }
         }
     }
 
@@ -226,73 +223,102 @@ object AutoSendQueue {
     }
 
     private fun drain(context: Context) {
-        val item = synchronized(this) { if (queue.isEmpty()) null else queue.removeFirst() }
+        android.util.Log.i("AutoSendQueue", "=== DRAIN CALLED ===")
+        val item = synchronized(this) { 
+            android.util.Log.d("AutoSendQueue", "Checking queue in drain() - size: ${queue.size}")
+            if (queue.isEmpty()) {
+                android.util.Log.d("AutoSendQueue", "Queue is empty in drain()")
+                null 
+            } else {
+                val next = queue.removeFirst()
+                android.util.Log.i("AutoSendQueue", "Removed item from queue, ${queue.size} remaining")
+                next
+            }
+        }
         if (item == null) {
-            synchronized(this) { running = false }
+            synchronized(this) { 
+                running = false
+                android.util.Log.i("AutoSendQueue", "Queue empty - stopping drain, all messages processed")
+            }
             notifyProgress()
+            // All messages have been sent - now trigger a rescan for NEW messages only
+            // Record the timestamp when messages finished sending
+            val sendCompleteTimestamp = System.currentTimeMillis()
+            // Delay by 2 seconds to allow SMS to be saved to database first
+            Handler(Looper.getMainLooper()).postDelayed({
+                android.util.Log.d("AutoSendQueue", "All messages sent successfully - scanning for NEW messages received after send completion")
+                // Only scan for messages received AFTER we finished sending
+                MessageScanner.scanAllMessages(context.applicationContext, sinceTimestamp = sendCompleteTimestamp)
+            }, 2000L)
             return
         }
         val (address, text, incomingMessageHash) = item
+        android.util.Log.i("AutoSendQueue", "Processing message from queue: '$text' to $address (queue size: ${queue.size})")
+        android.util.Log.i("AutoSendQueue", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        android.util.Log.i("AutoSendQueue", "→→→ SENDING MESSAGE NOW: '$text' to $address (queue remaining: ${queue.size})")
+        android.util.Log.i("AutoSendQueue", "→→→ Message hash: $incomingMessageHash")
         try {
-            val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            if (prefs.getBoolean("always_send_via_composer", false)) {
-                // Show heads-up notification with a tap-to-send action that opens the composer.
-                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                val channelId = "send_compose"
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    if (nm.getNotificationChannel(channelId) == null) {
-                        val ch = NotificationChannel(channelId, "Send via composer", NotificationManager.IMPORTANCE_HIGH)
-                        nm.createNotificationChannel(ch)
-                    }
+            // REMOVED: always_send_via_composer check - always send directly now
+            // Direct SMS send using preferred subscription
+            android.util.Log.i("AutoSendQueue", "→→→ Obtaining SMS manager...")
+            val sms = obtainSmsManager(context)
+            android.util.Log.i("AutoSendQueue", "→→→ SMS manager obtained, creating PendingIntents...")
+            
+            val requestCode = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+            val sentIntent = PendingIntent.getBroadcast(context, requestCode, Intent("SMS_SENT").apply {
+                putExtra("addr", address)
+                putExtra("text", text)
+                if (incomingMessageHash != null) {
+                    putExtra("incoming_message_hash", incomingMessageHash)
                 }
-                val composeIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + address)).apply {
-                    putExtra("sms_body", text)
-                }
-                val requestCode = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
-                val contentPi = PendingIntent.getActivity(context, requestCode, composeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-                val notif = NotificationCompat.Builder(context, channelId)
-                    .setSmallIcon(R.mipmap.ic_launcher)
-                    .setContentTitle("Tap to send")
-                    .setContentText("Open composer to send to $address")
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setAutoCancel(true)
-                    .setContentIntent(contentPi)
-                    .addAction(android.R.drawable.ic_menu_send, "Send", contentPi)
-                    .build()
-                nm.notify(requestCode, notif)
-            } else {
-                // Direct SMS send using preferred subscription
-                val sms = obtainSmsManager(context)
-                val sentIntent = PendingIntent.getBroadcast(context, 0, Intent("SMS_SENT").apply {
-                    putExtra("addr", address)
-                    putExtra("text", text)
-                    if (incomingMessageHash != null) {
-                        putExtra("incoming_message_hash", incomingMessageHash)
+            }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val deliveredIntent = PendingIntent.getBroadcast(context, requestCode + 1000, Intent("SMS_DELIVERED"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            android.util.Log.i("AutoSendQueue", "→→→ PendingIntents created (requestCode: $requestCode)")
+            
+            try {
+                // Check if message needs to be split into multiple parts
+                android.util.Log.i("AutoSendQueue", "→→→ Dividing message into parts...")
+                val parts = sms.divideMessage(text)
+                android.util.Log.i("AutoSendQueue", "→→→ Message divided: ${parts?.size ?: 1} part(s)")
+                if (parts != null && parts.size > 1) {
+                    // Send as multipart message
+                    val sentIntents = ArrayList<PendingIntent>(parts.size).apply { 
+                        repeat(parts.size) { add(sentIntent) } 
                     }
-                }, PendingIntent.FLAG_IMMUTABLE)
-                val deliveredIntent = PendingIntent.getBroadcast(context, 0, Intent("SMS_DELIVERED"), PendingIntent.FLAG_IMMUTABLE)
-                try {
-                    // Check if message needs to be split into multiple parts
-                    val parts = sms.divideMessage(text)
-                    if (parts != null && parts.size > 1) {
-                        // Send as multipart message
-                        val sentIntents = ArrayList<PendingIntent>(parts.size).apply { 
-                            repeat(parts.size) { add(sentIntent) } 
-                        }
-                        val deliveredIntents = ArrayList<PendingIntent>(parts.size).apply { 
-                            repeat(parts.size) { add(deliveredIntent) } 
-                        }
+                    val deliveredIntents = ArrayList<PendingIntent>(parts.size).apply { 
+                        repeat(parts.size) { add(deliveredIntent) } 
+                    }
+                    try {
+                        android.util.Log.i("AutoSendQueue", "→→→ CALLING sendMultipartTextMessage() NOW...")
                         sms.sendMultipartTextMessage(address, null, parts, sentIntents, deliveredIntents)
-                        android.util.Log.d("AutoSendQueue", "Multipart SMS sent to $address (${parts.size} parts)")
-                    } else {
-                        // Single part message
-                        sms.sendTextMessage(address, null, text, sentIntent, deliveredIntent)
-                        android.util.Log.d("AutoSendQueue", "SMS sent to $address: $text")
+                        android.util.Log.i("AutoSendQueue", "✓✓✓✓✓ SMS SEND CALLED (multipart ${parts.size} parts): '$text' to $address")
+                        android.util.Log.i("AutoSendQueue", "✓✓✓✓✓ VERIFICATION: sendMultipartTextMessage() method was successfully called")
+                        android.util.Log.i("AutoSendQueue", "✓✓✓✓✓ Waiting for system confirmation via SMS_SENT broadcast...")
+                        notifyStatus("📤 Sending message (${parts.size} parts)...")
+                    } catch (e: Exception) {
+                        android.util.Log.e("AutoSendQueue", "✗✗✗✗✗ EXCEPTION IN sendMultipartTextMessage CALL: ${e.message}", e)
+                        android.util.Log.e("AutoSendQueue", "Exception type: ${e.javaClass.simpleName}")
+                        e.printStackTrace()
+                        throw e
                     }
-                } catch (e: Exception) {
-                    android.util.Log.e("AutoSendQueue", "Failed to send: ${e.message}", e)
+                } else {
+                    // Single part message
+                    try {
+                        android.util.Log.i("AutoSendQueue", "→→→ CALLING sendTextMessage() NOW...")
+                        sms.sendTextMessage(address, null, text, sentIntent, deliveredIntent)
+                        android.util.Log.i("AutoSendQueue", "✓✓✓✓✓ SMS SEND CALLED: '$text' to $address")
+                        android.util.Log.i("AutoSendQueue", "✓✓✓✓✓ VERIFICATION: sendTextMessage() method was successfully called")
+                        android.util.Log.i("AutoSendQueue", "✓✓✓✓✓ Waiting for system confirmation via SMS_SENT broadcast...")
+                        notifyStatus("📤 Sending message...")
+                    } catch (e: Exception) {
+                        android.util.Log.e("AutoSendQueue", "✗✗✗✗✗ EXCEPTION IN sendTextMessage CALL: ${e.message}", e)
+                        android.util.Log.e("AutoSendQueue", "Exception type: ${e.javaClass.simpleName}")
+                        e.printStackTrace()
+                        throw e
+                    }
                 }
+            } catch (e: Exception) {
+                android.util.Log.e("AutoSendQueue", "✗✗ EXCEPTION SENDING SMS: Failed to send '$text' to $address: ${e.message}", e)
             }
         } catch (se: SecurityException) {
             android.util.Log.e("AutoSendQueue", "SecurityException: ${se.message}", se)
@@ -303,7 +329,12 @@ object AutoSendQueue {
             android.util.Log.e("AutoSendQueue", "Exception sending SMS: ${e.message}", e)
         }
         notifyProgress()
-        // Temporary: 2 second delay between messages
-        handler.postDelayed({ drain(context) }, 2000L)
+        // Continue processing immediately (no delay) to ensure all messages are sent
+        android.util.Log.d("AutoSendQueue", "Message processing complete, continuing to drain queue (queue size: ${queue.size})...")
+        // Use postDelayed with 0ms to ensure it runs after current handler tasks
+        handler.postDelayed({ 
+            android.util.Log.d("AutoSendQueue", "Handler posting next drain() call to continue processing")
+            drain(context) 
+        }, 0L)
     }
 }
