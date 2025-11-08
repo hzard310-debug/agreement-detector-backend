@@ -67,13 +67,13 @@ Script 3 "I've got a new plan with O2 and decided to keep the new number"
   Examples: "why?", "why have you got a new number?", "why did you get a new number?", "why didn't you port your old number?", "ok why you changed number", "why you changed number", "what for?", "reason?"
   CRITICAL: If the message contains "why" (especially "why have you got" or "why did you get" or "why do you have" or "why didn't you port" or "why you changed" + "new number" or "number"), this is Script 3, NOT Script 2
 
-Script 4 "Do not worry i will get it cancelled"
+Script 4 "Do not worry I will get it cancelled"
   TRIGGER: They mention contract/cancellation
   Keywords: contract, cancel, old plan, payment plan
   Hard rule: If the latest message contains the word "contract" (any casing), choose Script 4
   Examples: "what about the contract", "what about the contract i pay for"
 
-Script 5 "sorry i meant EE"
+Script 5 "Sorry I meant EE"
   TRIGGER: They say you were already with O2
   Keywords: already with O2, thought you were O2, weren't you O2
 
@@ -140,7 +140,7 @@ Script 13 "Payment Details" (from Android app)
   Action: Respond with EXACTLY the payment details from the Android app
   NOT: Use this script if they haven't received the payment request (Script 12) from you, or if payment_details is not provided, or if they're just asking what the payment is for (that's Script 14)
 
-Script 14 "its for a macbook i got i just have to pay it back today as my friend has bills to pay today"
+Script 14 "Its for a macbook I got I just have to pay it back today as my friend has bills to pay today"
   TRIGGER: They ask what the payment is for (ANY variation or question about what it's for)
   Keywords: "what is it for", "what's it for", "what for", "what payment", "what's the payment for", "what is the payment for", "payment for what", "what's this for", "what is this for", "what for", "for what", "what the payment paragraph is for", "what's the payment paragraph for", "what is the payment paragraph for", "payment paragraph for what", "what paragraph", "paragraph for what", "what's it", "what is it", "what's that for", "what's that", "what is that", "what is this payment", "what's this payment", "what is this payment for", "what's this payment for"
   Examples: "what is it for", "what's it for", "what for", "what payment", "what's the payment for", "what is the payment for", "what's it", "what is it", "what's that for", "what is this payment for"
@@ -148,22 +148,22 @@ Script 14 "its for a macbook i got i just have to pay it back today as my friend
     1. The payment request (Script 12) was sent at ANY point before in the conversation (doesn't have to be immediately previous)
     2. They ask what the payment is for (ANY question containing "what" and payment-related words like "it", "this", "that", "payment")
   CRITICAL: This has HIGHEST PRIORITY - it triggers BEFORE Script 13 (payment details). If they ask what it's for, ALWAYS respond with the macbook message, NOT payment details.
-  CRITICAL: The response MUST be EXACTLY "its for a macbook i got i just have to pay it back today as my friend has bills to pay today" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
+  CRITICAL: The response MUST be EXACTLY "Its for a macbook I got I just have to pay it back today as my friend has bills to pay today" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
   Action: ALWAYS respond with the macbook explanation when they ask what the payment is for
   NOT: Use this script if they haven't received the payment request (Script 12) from you
 
-Script 15 "yes please do not worry i will pay you back first thing tomorow morning"
+Script 15 "Yes please do not worry I will pay you back first thing tomorrow morning"
   TRIGGER: They ask if you will pay them back tomorrow or anything along those lines
   Keywords: "will you pay", "will you pay me back", "will you pay back", "pay me back tomorrow", "pay back tomorrow", "you will pay", "you will pay me back", "you will pay back", "promise you will pay", "promise you will pay me back", "promise you will pay back", "you'll pay", "you'll pay me back", "you'll pay back", "are you going to pay", "are you going to pay me back", "are you going to pay back", "going to pay", "going to pay me back", "going to pay back"
   Examples: "will you pay me back tomorrow", "will you pay back tomorrow", "you will pay me back tomorrow", "promise you will pay me back tomorrow", "are you going to pay me back tomorrow"
   CRITICAL: This script triggers if:
     1. The payment request (Script 12) was sent at ANY point before in the conversation
     2. They ask if you will pay them back tomorrow or similar questions
-  CRITICAL: The response MUST be EXACTLY "yes please do not worry i will pay you back first thing tomorow morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
+  CRITICAL: The response MUST be EXACTLY "Yes please do not worry I will pay you back first thing tomorrow morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
   Action: ALWAYS respond with the payback promise when they ask if you will pay back tomorrow
   NOT: Use this script if they haven't received the payment request (Script 12) from you
 
-Script 16 "just a friend of mine do no worry it is safe to pay i have spoken to him and he is aware of the payement"
+Script 16 "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment"
   TRIGGER: They ask who is this person or anything along those lines AFTER payment details have been sent
   Keywords: "who is this", "who is this person", "who is this guy", "who is this man", "who is this woman", "who is this lady", "who is he", "who is she", "who are they", "who is that", "who is that person", "who is that guy", "who is that man", "who is that woman", "who is that lady", "who's this", "who's this person", "who's this guy", "who's this man", "who's this woman", "who's this lady", "who's he", "who's she", "who's that", "who's that person", "who's that guy", "who's that man", "who's that woman", "who's that lady", "what is this person", "what is this guy", "what is this man", "what is this woman", "what is this lady"
   Examples: "who is this person", "who is this guy", "who's this person", "who is that person", "who is he"
@@ -171,11 +171,11 @@ Script 16 "just a friend of mine do no worry it is safe to pay i have spoken to 
     1. The payment request (Script 12) was sent at ANY point before in the conversation
     2. Payment details (Script 13) were sent at ANY point before in the conversation (after Script 12)
     3. They ask who is this person or similar questions
-  CRITICAL: The response MUST be EXACTLY "just a friend of mine do no worry it is safe to pay i have spoken to him and he is aware of the payement" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
+  CRITICAL: The response MUST be EXACTLY "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
   Action: ALWAYS respond with the friend explanation when they ask who the person is after payment details were sent
   NOT: Use this script if payment details haven't been sent yet, or if they haven't received the payment request (Script 12) from you
 
-Script 17 "because i cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, i have spoken to him and he is aware of the payement"
+Script 17 "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment"
   TRIGGER: They ask why am i paying it to this person or similar questions
   Keywords: "why am i paying", "why am i paying it to", "why am i paying this to", "why am i paying that to", "why am i paying to", "why do i pay", "why do i pay it to", "why do i pay this to", "why do i pay that to", "why do i pay to", "why should i pay", "why should i pay it to", "why should i pay this to", "why should i pay that to", "why should i pay to", "why pay", "why pay it to", "why pay this to", "why pay that to", "why pay to", "why to this person", "why to this guy", "why to this man", "why to this woman", "why to this lady", "why to him", "why to her", "why to them"
   Examples: "why am i paying it to this person", "why am i paying to this person", "why do i pay to this person", "why should i pay to this person", "why pay to this person"
@@ -183,7 +183,7 @@ Script 17 "because i cannot make payment to my friend until my online banking is
     1. The payment request (Script 12) was sent at ANY point before in the conversation
     2. Payment details (Script 13) were sent at ANY point before in the conversation (after Script 12)
     3. They ask why they are paying it to this person or similar questions
-  CRITICAL: The response MUST be EXACTLY "because i cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, i have spoken to him and he is aware of the payement" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
+  CRITICAL: The response MUST be EXACTLY "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
   Action: ALWAYS respond with the explanation when they ask why they are paying to this person
   NOT: Use this script if payment details haven't been sent yet, or if they haven't received the payment request (Script 12) from you
 
@@ -390,13 +390,13 @@ EXAMPLES (for clarity, not to output):
 - Latest: "what is it" (after receiving "Could you do me a favour please?") → Class: FAVOUR_RESPONSE (previous message was Script 9 + contains "what is it") → SEND Script 12 (response: payment request)
 - Latest: "what do you need" (after receiving "Could you do me a favour please?") → Class: FAVOUR_RESPONSE (previous message was Script 9 + contains "what do you need") → SEND Script 12 (response: payment request)
 - Latest: "of course" (after receiving "Could you do me a favour please?") → Class: FAVOUR_RESPONSE (previous message was Script 9 + contains "of course") → SEND Script 12 (response: payment request)
-- Latest: "what is it for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what is it for") → SEND Script 14 (response: "its for a macbook i got i just have to pay it back today as my friend has bills to pay today")
+- Latest: "what is it for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what is it for") → SEND Script 14 (response: "Its for a macbook I got I just have to pay it back today as my friend has bills to pay today")
 - Latest: "what's it for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what's it for") → SEND Script 14 (response: macbook explanation)
 - Latest: "what for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what for") → SEND Script 14 (response: macbook explanation)
 - Latest: "what's the payment for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what's the payment for") → SEND Script 14 (response: macbook explanation)
-- Latest: "will you pay me back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "will you pay back") → SEND Script 15 (response: "yes please do not worry i will pay you back first thing tomorow morning")
-- Latest: "who is this person" (after receiving payment details Script 13) → Class: WHO_PERSON_QUESTION (payment details were sent + contains "who is this person") → SEND Script 16 (response: "just a friend of mine do no worry it is safe to pay i have spoken to him and he is aware of the payement")
-- Latest: "why am i paying it to this person" (after receiving payment details Script 13) → Class: WHY_PAY_PERSON_QUESTION (payment details were sent + contains "why am i paying") → SEND Script 17 (response: "because i cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, i have spoken to him and he is aware of the payement")
+- Latest: "will you pay me back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "will you pay back") → SEND Script 15 (response: "Yes please do not worry I will pay you back first thing tomorrow morning")
+- Latest: "who is this person" (after receiving payment details Script 13) → Class: WHO_PERSON_QUESTION (payment details were sent + contains "who is this person") → SEND Script 16 (response: "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment")
+- Latest: "why am i paying it to this person" (after receiving payment details Script 13) → Class: WHY_PAY_PERSON_QUESTION (payment details were sent + contains "why am i paying") → SEND Script 17 (response: "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment")
 - Latest: "sure" (after receiving payment request Script 12) → Class: PAYMENT_DETAILS_RESPONSE (previous message was Script 12 + contains "sure" + payment_details provided) → SEND Script 13 (response: payment details from Android app)
 - Latest: "send me the details" (after receiving payment request Script 12) → Class: PAYMENT_DETAILS_RESPONSE (previous message was Script 12 + contains "send me the details" + payment_details provided) → SEND Script 13 (response: payment details from Android app)
 - Latest: "ok" (after receiving payment request Script 12) → Class: PAYMENT_DETAILS_RESPONSE (previous message was Script 12 + contains "ok" + payment_details provided) → SEND Script 13 (response: payment details from Android app)
@@ -465,10 +465,10 @@ OUTPUT POLICY:
 - Script 9 (Agreement/Acknowledgment): The response MUST be EXACTLY "Could you do me a favour please?" - NO variations, NO extra words, NO greetings, NO emojis. If their message contains kisses, append the same number of kisses at the end.
 - Script 12 (Favour Response - Payment Request): The response MUST be EXACTLY "I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,745 if that's okay?" - NEVER alter this message, NEVER change the amount (£1,745), NEVER modify the wording, NEVER add or remove anything. This message is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 13 (Payment Details): The response MUST be EXACTLY the payment details provided by the Android app (from the "payment_details" field in the request). Send it EXACTLY as provided - do NOT modify, alter, add, or remove anything. This is CRITICAL - send the payment details exactly as they are stored in the Android app. If their message contains kisses, append the same number of kisses at the end.
-- Script 14 (Macbook Explanation): The response MUST be EXACTLY "its for a macbook i got i just have to pay it back today as my friend has bills to pay today" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
-- Script 15 (Payback Promise): The response MUST be EXACTLY "yes please do not worry i will pay you back first thing tomorow morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
-- Script 16 (Friend Explanation): The response MUST be EXACTLY "just a friend of mine do no worry it is safe to pay i have spoken to him and he is aware of the payement" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
-- Script 17 (Why Pay Explanation): The response MUST be EXACTLY "because i cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, i have spoken to him and he is aware of the payement" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
+- Script 14 (Macbook Explanation): The response MUST be EXACTLY "Its for a macbook I got I just have to pay it back today as my friend has bills to pay today" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
+- Script 15 (Payback Promise): The response MUST be EXACTLY "Yes please do not worry I will pay you back first thing tomorrow morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
+- Script 16 (Friend Explanation): The response MUST be EXACTLY "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
+- Script 17 (Why Pay Explanation): The response MUST be EXACTLY "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 10 (Greeting): Generate a friendly, natural greeting response. Keep it brief (1-2 sentences), warm and casual, no emojis. Do NOT mention the new number or any scripts. If their message contains kisses, append the same number of kisses at the end.
 - Script 11 (General Conversation - ALL MESSAGES): Generate a natural, appropriate, caring response to their message. If their message contains kisses, append the same number of kisses at the end. 
   - For requests or statements asking permission/acknowledgment: Keep it SHORT and CASUAL (e.g., "Okay", "Sure", "That's fine", "No problem", "Will do") - don't be wordy or overly enthusiastic
@@ -798,7 +798,7 @@ def get_response():
         # If payment request was sent and they ask what it's for (ANY variation), ALWAYS respond with macbook message
         # This has HIGHEST PRIORITY - before payment details
         if payment_request_was_sent and (contains_what_for_keyword or is_what_question):
-            macbook_message = "its for a macbook i got i just have to pay it back today as my friend has bills to pay today"
+            macbook_message = "Its for a macbook I got I just have to pay it back today as my friend has bills to pay today"
             
             # Detect kisses and append if present
             kisses = None
@@ -891,7 +891,7 @@ def get_response():
         contains_payback_question = any(keyword in latest_lower for keyword in script15_keywords)
         
         if payment_request_was_sent and contains_payback_question:
-            payback_message = "yes please do not worry i will pay you back first thing tomorow morning"
+            payback_message = "Yes please do not worry I will pay you back first thing tomorrow morning"
             
             # Detect kisses and append if present
             kisses = None
@@ -944,7 +944,7 @@ def get_response():
         contains_who_person_question = any(keyword in latest_lower for keyword in script16_keywords)
         
         if payment_request_was_sent and payment_details_was_sent and contains_who_person_question:
-            friend_message = "just a friend of mine do no worry it is safe to pay i have spoken to him and he is aware of the payement"
+            friend_message = "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment"
             
             # Detect kisses and append if present
             kisses = None
@@ -984,7 +984,7 @@ def get_response():
         contains_why_pay_person_question = any(keyword in latest_lower for keyword in script17_keywords)
         
         if payment_request_was_sent and payment_details_was_sent and contains_why_pay_person_question:
-            why_pay_message = "because i cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, i have spoken to him and he is aware of the payement"
+            why_pay_message = "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment"
             
             # Detect kisses and append if present
             kisses = None
@@ -1234,9 +1234,9 @@ Remember: READ THE FULL MESSAGE, not just keywords. Understand the complete mean
                 script_id = "script2"
             elif "Yes ill be using this number from now on" in decision_response:
                 script_id = "script2"
-            elif "Do not worry i will get it cancelled" in decision_response:
+            elif "Do not worry I will get it cancelled" in decision_response:
                 script_id = "script4"
-            elif "sorry i meant EE" in decision_response:
+            elif "Sorry I meant EE" in decision_response:
                 script_id = "script5"
             elif "Yes ill be using this number from now" in decision_response:
                 script_id = "script6"
@@ -1585,9 +1585,9 @@ Generate a natural, casual response based on what they ACTUALLY said. DO NOT ret
                     script_id = "script2"
                 elif "Yes ill be using this number from now on" in decision_response:
                     script_id = "script2"
-                elif "Do not worry i will get it cancelled" in decision_response:
+                elif "Do not worry I will get it cancelled" in decision_response:
                     script_id = "script4"
-                elif "sorry i meant EE" in decision_response:
+                elif "Sorry I meant EE" in decision_response:
                     script_id = "script5"
                 elif "Yes ill be using this number from now" in decision_response:
                     script_id = "script6"
@@ -1781,7 +1781,7 @@ Analyze the conversation and provide an ALTERNATIVE response.
                 
                 if mentions_paying_for_contract:
                     # Append cancellation message with proper grammar, no fullstop
-                    cancellation_msg = " Do not worry i will get it cancelled"
+                    cancellation_msg = " Do not worry I will get it cancelled"
                     # Remove any trailing periods from Script 3 response first
                     script3_response = decision_response.rstrip()
                     while script3_response.endswith('.'):
