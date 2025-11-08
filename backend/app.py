@@ -767,14 +767,20 @@ def get_response():
                 "go away im not dad", "go away im not ur dad", "go away im not your dad",
                 "go away i'm not dad", "go away i'm not ur dad", "go away i'm not your dad",
                 "im not dad", "i'm not dad", "im not ur dad", "i'm not ur dad",
-                "im not your dad", "i'm not your dad", "not dad", "not ur dad", "not your dad",
+                "im not your dad", "i'm not your dad", "im not your dad!", "i'm not your dad!",
+                "not dad", "not ur dad", "not your dad", "not your dad!",
                 "go away", "leave me alone", "stop messaging", "stop texting",
                 "wrong son", "wrong daughter", "wrong child", "not my son", "not my daughter",
                 "my children are estranged", "children are estranged", "estranged for many years",
                 "forgotten their names", "i've forgotten their names", "i have forgotten their names",
-                "dont think we are", "don't think we are", "dont think you are", "don't think you are"
+                "dont think we are", "don't think we are", "dont think you are", "don't think you are",
+                "i'm not your", "im not your", "i am not your", "i'm not ur", "im not ur"
             ]
-            is_disbelief = any(keyword in latest_lower for keyword in disbelief_keywords)
+            # Also check for patterns like "im not your dad" or "i'm not your dad" (with or without punctuation)
+            is_disbelief = any(keyword in latest_lower for keyword in disbelief_keywords) or \
+                          ("not" in latest_lower and "your dad" in latest_lower) or \
+                          ("not" in latest_lower and "ur dad" in latest_lower) or \
+                          ("not" in latest_lower and "your" in latest_lower and ("dad" in latest_lower or "father" in latest_lower or "parent" in latest_lower))
             
             if is_disbelief:
                 return jsonify({
