@@ -212,12 +212,28 @@ class SmsProcessingService : Service() {
                             Thread.sleep(delayMs)
                         } else {
                             Log.e(TAG, "Failed after $maxRetries attempts: ${e.message}", e)
+                            // On final timeout failure, use fallback response
+                            Log.w(TAG, "Backend timeout after all retries - using fallback response")
+                            handleNoSendFallback(sender, body, "Backend timeout", turnsWithCurrent, prefs)
                             success = true
                         }
                     }
                 }
+                
+                // If we still haven't sent anything after all retries, use fallback
+                if (!success) {
+                    Log.w(TAG, "No response sent after all attempts - using fallback")
+                    handleNoSendFallback(sender, body, "No response from backend", turnsWithCurrent, prefs)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing SMS in service: ${e.message}", e)
+                // On exception, try to send fallback response
+                try {
+                    val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+                    handleNoSendFallback(sender, body, "Exception occurred", emptyList(), prefs)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Error in fallback: ${e2.message}", e2)
+                }
             } finally {
                 // Release wake lock
                 try {
@@ -242,7 +258,21 @@ class SmsProcessingService : Service() {
     }
     
     private fun handleNoSendFallback(sender: String, body: String, reasoning: String, turnsWithCurrent: List<Map<String, String>>, prefs: android.content.SharedPreferences) {
-        val lowerBody = body.lowercase()
+        val lowerBody = body.lowercase().trim()
+        
+        // CRITICAL: Check for "Who's this" or "Who is this" - should trigger Script 1
+        val isWhoQuestion = (lowerBody.contains("who") && (lowerBody.contains("this") || lowerBody.contains("is") || lowerBody.contains("'s"))) &&
+                           !lowerBody.contains("is this") && // Exclude "is this [name]" which is Script 2
+                           !lowerBody.matches(Regex(".*is this [a-z]+.*", RegexOption.IGNORE_CASE)) // Exclude "is this [name]"
+        
+        if (isWhoQuestion) {
+            // Script 1: "Your eldest and favourite"
+            val response = "Your eldest and favourite"
+            val incomingMessageHash = hashMessage(sender, body)
+            AutoSendQueue.enqueue(this, sender, response, AutoSendQueue.Source.AI, incomingMessageHash)
+            android.util.Log.d(TAG, "Fallback: Script 1 response queued for 'Who's this' question: $response")
+            return
+        }
         
         // Detect ANY question
         val isQuestion = lowerBody.contains("?") ||
