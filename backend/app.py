@@ -1860,8 +1860,13 @@ def get_response():
         
         # Check if they said "no" to the favour request - ignore it
         if previous_was_favour_request:
-            no_keywords = ["no", "nope", "sorry no", "sorry, no", "can't", "cannot", "cant", "unable", "not able", "won't", "wont", "will not", "don't want", "dont want", "not interested", "not gonna", "not going to", "refuse", "decline"]
-            is_no_response = any(keyword in latest_lower for keyword in no_keywords)
+            no_patterns = [
+                r"\bno\b", r"\bnope\b", r"\bsorry\s*no\b", r"\bsorry,\s*no\b",
+                r"\bcan['']t\b", r"\bcannot\b", r"\bcant\b", r"\bunable\b", r"\bnot\s+able\b",
+                r"\bwon['']t\b", r"\bwont\b", r"\bwill\s+not\b", r"\bdon['']t\s+want\b", r"\bdont\s+want\b",
+                r"\bnot\s+interested\b", r"\bnot\s+gonna\b", r"\bnot\s+going\s+to\b", r"\brefuse\b", r"\bdecline\b"
+            ]
+            is_no_response = any(re.search(pattern, latest_lower) for pattern in no_patterns)
             if is_no_response:
                 return jsonify({
                     "action": "NO_SEND",
