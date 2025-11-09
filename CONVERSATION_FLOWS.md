@@ -548,7 +548,7 @@ This document lists **every possible conversation flow** that can occur with the
 
 **Trigger:** They ask why they can’t pay into your own account after Script 12.
 
-**Response:** "is becasue i cannot make online payment until my new number is added, so could you please make the payemnt for me on behalf please and i promise i will pay you back fritst thing in the morning"
+**Response:** "its because i can not make online payment until my new number is added, so could you please make the payment for me on my behalf please and i promise i will pay you back first thing in the morning"
 
 ### Flow Examples:
 1. **Why not your account**
@@ -667,7 +667,7 @@ This document lists **every possible conversation flow** that can occur with the
 18. **Script 18:** O2 call alert → "I cant call right now can you message?"
 19. **Script 19:** Where to pay → Payment details from app
 20. **Script 20:** Why so much → "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
-21. **Script 21:** Why not your account → "it is because i cannot make online payment until my new number is added, so could you please make the payment for me on behalf please and i promise i will pay you back first thing in the morning"
+21. **Script 21:** Why not your account → "its because i can not make online payment until my new number is added, so could you please make the payment for me on my behalf please and i promise i will pay you back first thing in the morning"
 
 ---
 
