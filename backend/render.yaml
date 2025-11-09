@@ -5,8 +5,43 @@ services:
     pythonVersion: "3.11"
     rootDir: backend
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 8 --timeout 120 --threads 4 app:app
     envVars:
       - key: CLAUDE_API_KEY
         scope: run
         sync: false
+      - key: REDIS_URL
+        scope: run
+        sync: false
+      - key: CELERY_BROKER_URL
+        scope: run
+        sync: false
+      - key: CELERY_RESULT_BACKEND
+        scope: run
+        sync: false
+    # For 100k devices, use multiple instances or auto-scaling
+    # Recommended: 5-10 instances for production
+    # Auto-scaling: Enable in Render dashboard based on CPU/memory
+
+  - type: worker
+    name: celery-worker
+    runtime: python
+    pythonVersion: "3.11"
+    rootDir: backend
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: celery -A celery_app worker --loglevel=info --concurrency=4
+    envVars:
+      - key: CLAUDE_API_KEY
+        scope: run
+        sync: false
+      - key: REDIS_URL
+        scope: run
+        sync: false
+      - key: CELERY_BROKER_URL
+        scope: run
+        sync: false
+      - key: CELERY_RESULT_BACKEND
+        scope: run
+        sync: false
+    # Scale workers independently based on queue depth
+    # Recommended: 3-5 workers for 100k devices
