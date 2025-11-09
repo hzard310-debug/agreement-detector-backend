@@ -1941,7 +1941,7 @@ def get_response():
             payment_flow_detected = True
 
         if payment_flow_detected and asks_why_so_much(latest_lower):
-            sympathy_message = "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+            sympathy_message = "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
             kisses = None
             if latest_msg:
                 end_patterns = [
@@ -2564,7 +2564,7 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
                 script_id = "script2"
             elif response_in_variant("please do not worry i will definitely pay you back first thing in the morning", decision_response):
                 script_id = "script15"
-            elif decision_response_lower.startswith("i am soo sorry honestly"):
+            elif decision_response_lower.startswith("i am so sorry honestly"):
                 script_id = "script20"
             elif response_in_variant("its because i can not make online payment until my new number is added, so could you please make the payment for me on my behalf please and i promise i will pay you back first thing in the morning", decision_response):
                 script_id = "script21"

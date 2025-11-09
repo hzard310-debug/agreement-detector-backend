@@ -532,13 +532,13 @@ This document lists **every possible conversation flow** that can occur with the
 
 **Trigger:** They ask why the amount is so high after Script 12
 
-**Response:** "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+**Response:** "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
 
 ### Flow Examples:
 1. **Why So Much**
    - You: "I need to make a payment today..." (Script 12)
    - Them: "Why so much though?"
-   - You: "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning" (Script 20)
+   - You: "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning" (Script 20)
    - Them: "ok"
    - You: [Payment details from app] (Script 13)
 
@@ -555,6 +555,20 @@ This document lists **every possible conversation flow** that can occur with the
    - You: "I need to make a payment today..." (Script 12)
    - Them: "Why can't I just pay it into your account?"
    - You: "it is because i cannot make online payment until my new number is added, so could you please make the payment for me on behalf please and i promise i will pay you back first thing in the morning" (Script 21)
+
+---
+
+## **Script 22: Normal Account Question**
+
+**Trigger:** They ask if they should pay into your normal/main account after Script 12
+
+**Response:** "no please, i can not make payment right now until i have sorted out my online banking. would you be able to make the transfer on my behalf please if i sned the details"
+
+### Flow Examples:
+1. **Normal Account Payment**
+   - You: "I need to make a payment today..." (Script 12)
+   - Them: "Should I pay it into your normal account?"
+   - You: "no please, i can not make payment right now until i have sorted out my online banking. would you be able to make the transfer on my behalf please if i sned the details" (Script 22)
 
 ---
 
@@ -666,8 +680,9 @@ This document lists **every possible conversation flow** that can occur with the
 17. **Script 17:** Why pay explanation → "Because I cannot make payment..."
 18. **Script 18:** O2 call alert → "I cant call right now can you message?"
 19. **Script 19:** Where to pay → Payment details from app
-20. **Script 20:** Why so much → "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+20. **Script 20:** Why so much → "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
 21. **Script 21:** Why not your account → "its because i can not make online payment until my new number is added, so could you please make the payment for me on my behalf please and i promise i will pay you back first thing in the morning"
+22. **Script 22:** Normal account question → "no please, i can not make payment right now until i have sorted out my online banking. would you be able to make the transfer on my behalf please if i sned the details"
 
 ---
 
