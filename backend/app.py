@@ -1094,6 +1094,9 @@ def get_response():
                 payment_request_flag = None
         else:
             payment_request_flag = None
+
+        payment_request_was_sent = False
+
         if payment_request_flag is None and parsed_turns:
             for turn in parsed_turns:
                 if (turn.get('role') or '').lower() == 'you':
