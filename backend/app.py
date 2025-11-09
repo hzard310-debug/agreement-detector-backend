@@ -1,81 +1,303 @@
 # SMS Automation Backend - Agreement Detector API
 from flask import Flask, request, jsonify
 import anthropic
-from groq import Groq
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
 import os
 from datetime import datetime, timedelta
 import json
 import re
 import hashlib
+import time
 
 app = Flask(__name__)
 
 # Track sent messages to prevent duplicates: (device_id, contact_id, script) -> timestamp
 sent_tracker = {}
+payment_details_sent = {}
+payment_request_sent = {}
+last_response_per_contact = {}
+payment_confirmed_contacts = {}
+extra_request_sent = {}
+favour_request_contacts = {}
+
+@app.route("/", methods=["GET", "HEAD"])
+def health_check():
+    """Simple health check for Render (and other uptime monitors)."""
+    return "", 204
+
+FAVOUR_VARIANTS = [
+    "Could you do me a favour please?",
+    "Could you do me a favour?",
+    "Do you think you could do me a small favour?",
+    "Could you do me a quick favour when you get a sec?",
+    "Any chance you could do me a little favour?"
+]
+
+def _normalize_match_text(text: str) -> str:
+    return re.sub(r'[^a-z0-9]+', ' ', (text or '').lower()).strip()
+
+_FAVOUR_MATCH_INPUTS = list(dict.fromkeys(FAVOUR_VARIANTS + [
+    "Could you do me a favour please?",
+    "Could you do me a favour please",
+    "Could you do me a favour?",
+    "Could you do me a favour"
+]))
+
+FAVOUR_PHRASES_LOWER = [phrase.lower() for phrase in _FAVOUR_MATCH_INPUTS]
+FAVOUR_PHRASES_NORMALIZED = [_normalize_match_text(phrase) for phrase in _FAVOUR_MATCH_INPUTS]
+
+def contains_favour_request_phrase(text: str) -> bool:
+    if not text:
+        return False
+    stripped = (text or "").strip()
+    stripped = re.sub(r'[\.\!\?]+$', '', stripped)
+    stripped = re.sub(r'\s*[xX]{2,}\s*$', '', stripped)
+    lower_text = stripped.lower()
+    normalized_text = _normalize_match_text(stripped)
+    if any(phrase and phrase in lower_text for phrase in FAVOUR_PHRASES_LOWER):
+        return True
+    if any(phrase and phrase in normalized_text for phrase in FAVOUR_PHRASES_NORMALIZED):
+        return True
+    return False
+
+def mark_favour_request(contact_key: str):
+    if contact_key:
+        favour_request_contacts[contact_key] = True
+
+VARIANT_SETS = {
+    "Your eldest and favourite": [
+        "Your eldest and favourite",
+        "Your eldest and favourite here.",
+        "It's your eldest and favourite."
+    ],
+    "Yes I'll be using this number from now on": [
+        "Yes I'll be using this number from now on",
+        "Yeah I'll be using this number from now on.",
+        "I'll be sticking with this number from now on."
+    ],
+    "Yes ill be using this number from now on": [
+        "Yes ill be using this number from now on",
+        "Yeah ill be using this number from now on.",
+        "I'll be using this one from now on."
+    ],
+    "Its permanent ill be using this number from now on": [
+        "Its permanent ill be using this number from now on",
+        "It's permanent—I'll be using this number from now on.",
+        "Yeah it's permanent, I'll be using this one now."
+    ],
+    "Its my personal number": [
+        "Its my personal number",
+        "It's my personal number now.",
+        "Yeah this is my personal number."
+    ],
+    "You can delete the old number as ill be using this one from now on": [
+        "You can delete the old number as ill be using this one from now on",
+        "Feel free to delete the old number—I'll be on this one now.",
+        "You can drop the old number, I'm sticking with this one."
+    ],
+    "I'm not sure yet, I might be tied up. If anything changes I'll let you know.": [
+        "I'm not sure yet, I might be tied up. If anything changes I'll let you know.",
+        "I'm not totally sure—if anything changes I'll let you know.",
+        "Not certain yet, I'll let you know if anything changes."
+    ],
+    "Sorry, I've just been busy lately.": [
+        "Sorry, I've just been busy lately.",
+        "Sorry! I've just been snowed under lately.",
+        "Sorry about that—it's been a bit hectic."
+    ],
+    "I just grabbed a quick sandwich earlier, nothing too exciting. What about you?": [
+        "I just grabbed a quick sandwich earlier, nothing too exciting. What about you?",
+        "Only had a quick sandwich earlier—what about you?",
+        "Just a quick sandwich for me. What did you have?"
+    ],
+    "I can't call right now, could you drop me a message instead?": [
+        "I can't call right now, could you drop me a message instead?",
+        "Can't talk right now—could you message me instead?",
+        "Can't pick up at the moment, just drop me a message?"
+    ],
+    "Thanks, I'm all sorted with it now but really appreciate you offering.": [
+        "Thanks, I'm all sorted with it now but really appreciate you offering.",
+        "Thanks for offering, I'm fine now though—really appreciate it.",
+        "Appreciate the offer, but I'm all sorted now."
+    ],
+    "Payment details are okay, would you be able to help with half of the payment?": [
+        "Payment details are okay, would you be able to help with half of the payment?",
+        "That's alright—could you help with half of the payment instead?",
+        "Okay, could you cover half of the payment?"
+    ],
+    "Thank you so much honestly, could you please send over your bank details so I can pay you back first thing in the morning and also if possible can you please send over a confirmation of the payment so I can send it over.": [
+        "Thank you so much honestly, could you please send over your bank details so I can pay you back first thing in the morning and also if possible can you please send over a confirmation of the payment so I can send it over.",
+        "Thanks so much—could you send your bank details so I can pay you back first thing tomorrow, and a confirmation so I can pass it on?",
+        "Really appreciate it; could you send your bank details so I can return it first thing tomorrow, and a quick confirmation if you can?"
+    ],
+    "Is there anyone you can ask? It's urgent, I really don't want to get hit with late fees and I promise I'll get it back to you first thing in the morning.": [
+        "Is there anyone you can ask? It's urgent, I really don't want to get hit with late fees and I promise I'll get it back to you first thing in the morning.",
+        "Could you ask someone? It's urgent and I'd hate to get a late fee—I'll get it back to you first thing tomorrow.",
+        "Is there anyone you could check with? I really don't want a late fee and I'll repay you first thing in the morning."
+    ],
+    "I'm good thanks, how are you?": [
+        "I'm good thanks, how are you?",
+        "I'm good thanks—how are you doing?",
+        "Doing well thanks, how about you?"
+    ],
+    "Yeah everything's okay, how about you?": [
+        "Yeah everything's okay, how about you?",
+        "Yeah everything's alright, how about you?",
+        "All good here, how about you?"
+    ],
+    "please do not worry i will definitely pay you back first thing in the morning": [
+        "please do not worry i will definitely pay you back first thing in the morning"
+    ],
+    "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning": [
+        "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+    ],
+    "is becasue i cannot make online payment until my new number is added, so could you please make the payemnt for me on behalf please and i promise i will pay you back fritst thing in the morning": [
+        "is becasue i cannot make online payment until my new number is added, so could you please make the payemnt for me on behalf please and i promise i will pay you back fritst thing in the morning"
+    ],
+    "Hi I didn't want to ask at first because I thought it would be a bit much. But do you think you can help out with another £950 and I promise I'll pay you back everything tomorrow? Sorry, I didn't really want to ask but I just need to pay off the full bill": [
+        "Hi I didn't want to ask at first because I thought it would be a bit much. But do you think you can help out with another £950 and I promise I'll pay you back everything tomorrow? Sorry, I didn't really want to ask but I just need to pay off the full bill",
+        "Hi, I know it's a lot to ask, but could you possibly help with another £950? I promise I'll pay everything back tomorrow—just need to clear the full bill.",
+        "I wasn't going to ask, but do you think you could help with another £950? I'll pay you back tomorrow, I just need to settle the full bill."
+    ],
+    "Yes please, I would really appreciate it thank you.": [
+        "Yes please, I would really appreciate it thank you.",
+        "Yes please, that would help a lot—thank you.",
+        "Yes please, I'd really appreciate it—thank you!"
+    ]
+}
+
+for fav in FAVOUR_VARIANTS:
+    VARIANT_SETS.setdefault(fav, FAVOUR_VARIANTS)
+
+def select_variant(contact_id, base_text):
+    """Rotate responses per contact to avoid sending same message twice."""
+    contact_key = str(contact_id)
+    variants = VARIANT_SETS.get(base_text)
+    if variants:
+        # ensure deterministic ordering
+        options = list(dict.fromkeys(variants))  # preserve order, remove dupes
+        last = last_response_per_contact.get(contact_key)
+        if last in options:
+            idx = (options.index(last) + 1) % len(options)
+            choice = options[idx]
+        else:
+            choice = options[0]
+    else:
+        last = last_response_per_contact.get(contact_key)
+        if last == base_text:
+            choice = base_text if base_text.endswith(".") else base_text + "."
+            if choice == last:
+                choice = base_text + "!"
+        else:
+            choice = base_text
+    last_response_per_contact[contact_key] = choice
+    return choice
+
+def response_in_variant(base_text, response_text):
+    variants = VARIANT_SETS.get(base_text)
+    if variants:
+        return response_text in variants
+    return response_text == base_text
 
 # Initialize Claude client with API key from environment
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 if not CLAUDE_API_KEY:
-    print("WARNING: CLAUDE_API_KEY environment variable not set! Will use Groq only.")
-    claude_client = None
-else:
-    claude_client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
-
-# Initialize Groq client as fallback (no rate limits, fast)
+    raise RuntimeError("CLAUDE_API_KEY environment variable not set.")
+claude_client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    print("WARNING: GROQ_API_KEY environment variable not set! Will use Claude only.")
-    groq_client = None
-else:
-    groq_client = Groq(api_key=GROQ_API_KEY)
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY and Groq else None
 
-def call_ai_with_fallback(system_prompt, user_message, max_tokens=350, model="claude-3-haiku-20240307"):
-    """
-    Call AI with fallback: Try Claude first, then Groq if Claude fails.
-    Returns the response text from whichever service succeeds.
-    """
-    # Try Claude first (better quality)
-    if claude_client:
-        try:
-            message = claude_client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                system=system_prompt,
-                messages=[
-                    {"role": "user", "content": user_message}
-                ]
-            )
-            response_text = message.content[0].text
-            print("✓ Claude API call successful")
-            return response_text
-        except Exception as e:
-            print(f"⚠ Claude API failed: {str(e)} - Falling back to Groq")
-            # Fall through to Groq
-    
-    # Fallback to Groq (no rate limits, fast)
-    if groq_client:
-        try:
-            # Use Llama 3.1 70B for best quality, or Mixtral 8x7B for speed
-            groq_model = "llama-3.1-70b-versatile"  # Best quality
-            # Alternative: "mixtral-8x7b-32768" for faster responses
-            
-            chat_completion = groq_client.chat.completions.create(
-                model=groq_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                max_tokens=max_tokens,
-                temperature=0.7
-            )
-            response_text = chat_completion.choices[0].message.content
-            print("✓ Groq API call successful (fallback)")
-            return response_text
-        except Exception as e:
-            print(f"✗ Groq API also failed: {str(e)}")
-            raise Exception(f"Both Claude and Groq failed. Claude error: {str(e) if claude_client else 'Not configured'}, Groq error: {str(e)}")
-    else:
-        raise Exception("No AI service configured. Please set either CLAUDE_API_KEY or GROQ_API_KEY")
+FALLBACK_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+
+def _is_rate_limit_error(error: Exception) -> bool:
+    msg = str(error).lower()
+    keywords = ["rate limit", "overloaded", "429", "too many requests", "service unavailable"]
+    return any(token in msg for token in keywords)
+
+def contains_bank_information(text_lower: str, original_text: str) -> bool:
+    bank_terms = [
+        "account", "sort", "iban", "bic", "swift", "routing", "bank details",
+        "account number", "sort code", "acc no", "acct", "iban:", "sort:"
+    ]
+    if any(term in text_lower for term in bank_terms):
+        return True
+    digit_count = sum(ch.isdigit() for ch in original_text or "")
+    return digit_count >= 6
+
+def normalize_fallback_response(text: str) -> str:
+    if not text:
+        return text
+    cleaned = re.sub(r'\s+', ' ', text).strip()
+    if not cleaned:
+        return cleaned
+    if cleaned[0].islower():
+        cleaned = cleaned[0].upper() + cleaned[1:]
+    return cleaned
+
+def build_script16_message(latest_msg: str) -> str:
+    friend_message = "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment"
+    kisses = None
+    if latest_msg:
+        end_patterns = [
+            r'([xX]{2,})\s*$',
+            r'\s+([xX]{2,})\s*$',
+            r'([xX]{2,})[\.\?\!]*\s*$',
+        ]
+        for pattern in end_patterns:
+            end_match = re.search(pattern, latest_msg, re.MULTILINE)
+            if end_match:
+                kisses = end_match.group(1)
+                break
+        if not kisses:
+            any_match = re.search(r'([xX]{2,})', latest_msg)
+            if any_match:
+                kisses = any_match.group(1)
+    if kisses:
+        friend_message = friend_message.rstrip() + " " + kisses
+    friend_message = friend_message.rstrip()
+    while friend_message.endswith('.'):
+        friend_message = friend_message[:-1].rstrip()
+    return friend_message
+
+def call_ai(system_prompt, user_message, max_tokens=350, model="claude-3-haiku-20240307"):
+    """Call Claude and return response text with optional Groq fallback."""
+    try:
+        message = claude_client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": user_message}
+            ]
+        )
+        response_text = message.content[0].text
+        print("✓ Claude API call successful")
+        return response_text
+    except Exception as claude_error:
+        print(f"⚠ Claude API failed: {claude_error}")
+        if groq_client and _is_rate_limit_error(claude_error):
+            try:
+                completion = groq_client.chat.completions.create(
+                    model=FALLBACK_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message}
+                    ],
+                    max_tokens=max_tokens,
+                    temperature=0.2
+                )
+                groq_response = completion.choices[0].message.content
+                groq_response = normalize_fallback_response(groq_response)
+                print("✓ Groq fallback successful")
+                print(f"[Groq fallback sample] {groq_response}")
+                return groq_response
+            except Exception as groq_error:
+                print(f"✗ Groq fallback failed: {groq_error}")
+                raise Exception(f"Claude error: {claude_error}\nGroq fallback error: {groq_error}") from groq_error
+        raise claude_error
 
 # System prompt for the AI - INTELLIGENT CONVERSATION ANALYSIS
 SYSTEM_PROMPT = """You are an SMS automation assistant. Analyze conversations and pick the right response.
@@ -111,6 +333,12 @@ STEP 3: Analyze what they're ACTUALLY ASKING ABOUT or saying (read the whole mes
 STEP 4: Pick the matching script based on FULL understanding
 STEP 5: Ensure your response makes sense in context and contributes to the conversation flow
 STEP 6: Verify your response addresses what was actually said and fits naturally into the conversation
+
+FLOW CONTROL CONTEXT (PAYMENT / FAVOUR FLAGS):
+- You will be given CONTEXT FLAGS in the user message (e.g., FAVOUR_REQUEST_IN_CONVERSATION, PAYMENT_REQUEST_IN_CONVERSATION, PAYMENT_FLOW_ACTIVE).
+- If FAVOUR_REQUEST_IN_CONVERSATION is YES (meaning "Could you do me a favour please?" has already been sent at any point), you MUST NOT use Script 1, Script 2, Script 3, Script 4, or Script 5 again in this conversation. The identity/number scripts are finished at that point.
+- When FAVOUR_REQUEST_IN_CONVERSATION is YES, only use payment-flow scripts (Scripts 9–17) or Script 11 for natural replies that keep the payment conversation moving. Never go back to identity scripts.
+- If PAYMENT_FLOW_ACTIVE is YES, prioritize the payment follow-up scripts (12–17) whenever their triggers match. Only fall back to Script 11 if no payment-flow trigger applies.
 
 SCRIPT MATCHING RULES:
 
@@ -208,7 +436,7 @@ Script 12 "I need to make a payment today but can't for 24h until my new number 
 
 Script 13 "Payment Details" (from Android app)
   TRIGGER: They EXPLICITLY ask for payment details OR explicitly agree to make the payment OR ask who to pay
-  Keywords for asking: "send me the details", "send details", "what are the details", "what details", "what's the details", "what's the payment details", "payment details", "bank details", "account details", "send it", "send them", "what do i need", "what information", "what info", "i need the details", "i need the payment details", "i need the bank details", "i need the account details", "can you send the details", "can you send me the details", "send the payment details", "send the bank details", "send the account details", "who am i paying", "who am i paying it to", "who do i pay", "who do i pay it to", "who should i pay", "who should i pay it to", "who to pay", "pay to who", "pay to whom", "who to send it to", "who to send to", "send to who", "send to whom", "who do i send it to", "who do i send to", "who should i send it to", "who should i send to"e
+  Keywords for asking: "send me the details", "send details", "what are the details", "what details", "what's the details", "what's the payment details", "payment details", "bank details", "account details", "send it", "send them", "what do i need", "what information", "what info", "i need the details", "i need the payment details", "i need the bank details", "i need the account details", "can you send the details", "can you send me the details", "send the payment details", "send the bank details", "send the account details", "who am i paying", "who am i paying it to", "who do i pay", "who do i pay it to", "who should i pay", "who should i pay it to", "who to pay", "pay to who", "pay to whom", "who to send it to", "who to send to", "send to who", "send to whom", "who do i send it to", "who do i send to", "who should i send it to", "who should i send toe
   Keywords for agreeing: "sure", "ok", "okay", "yes", "of course", "absolutely", "yeah", "yep", "yup", "go ahead", "i can do that", "i'll do it", "i can help", "i'll help", "i'll make the payment", "i can make the payment", "i'll transfer", "i can transfer"
   Examples: "send me the details", "what are the details", "payment details", "bank details", "sure", "ok", "yes", "i'll make the payment", "i can help", "who am i paying it to", "who do i pay", "who should i pay it to"
   CRITICAL: This script ONLY triggers if:
@@ -222,8 +450,8 @@ Script 13 "Payment Details" (from Android app)
 
 Script 14 "Its for a macbook I got I just have to pay it back today as my friend has bills to pay today"
   TRIGGER: They ask what the payment is for (ANY variation or question about what it's for)
-  Keywords: "what is it for", "what's it for", "what for", "what payment", "what's the payment for", "what is the payment for", "payment for what", "what's this for", "what is this for", "what for", "for what", "what the payment paragraph is for", "what's the payment paragraph for", "what is the payment paragraph for", "payment paragraph for what", "what paragraph", "paragraph for what", "what's it", "what is it", "what's that for", "what's that", "what is that", "what is this payment", "what's this payment", "what is this payment for", "what's this payment for"
-  Examples: "what is it for", "what's it for", "what for", "what payment", "what's the payment for", "what is the payment for", "what's it", "what is it", "what's that for", "what is this payment for"
+  Keywords: "what is it for", "what's it for", "what for", "what payment", "what's the payment for", "what is the payment for", "payment for what", "what's this for", "what is this for", "what for", "for what", "what the payment paragraph is for", "what's the payment paragraph for", "what is the payment paragraph for", "payment paragraph for what", "what paragraph", "paragraph for what", "what's it", "what is it", "what's that for", "what's that", "what is that", "what is this payment", "what's this payment", "what is this payment for", "what's this payment for", "why do you need to make this payment", "why do you need to make the payment", "why do you need this payment", "why do you need to pay this", "why do you need to pay it", "why do you need to pay it for"
+  Examples: "what is it for", "what's it for", "what for", "what payment", "what's the payment for", "what is the payment for", "what's it", "what is it", "what's that for", "what is this payment for", "why do you need to make this payment", "why do you need to make the payment", "why do you need this payment", "why do you need to pay this", "why do you need to pay it", "why do you need to pay it for"
   CRITICAL: This script ALWAYS triggers if:
     1. The payment request (Script 12) was sent at ANY point before in the conversation (doesn't have to be immediately previous)
     2. They ask what the payment is for (ANY question containing "what" and payment-related words like "it", "this", "that", "payment")
@@ -232,15 +460,36 @@ Script 14 "Its for a macbook I got I just have to pay it back today as my friend
   Action: ALWAYS respond with the macbook explanation when they ask what the payment is for
   NOT: Use this script if they haven't received the payment request (Script 12) from you
 
-Script 15 "Its okay please do not worry I will pay you back first thing tomorrow morning"
+Script 19 "Payment details" (where/what/which account to pay into)
+  TRIGGER: They ask where/what/which account/bank they should pay the money into AFTER the payment request (Script 12)
+  Keywords: "where do i pay", "where should i pay", "where am i paying", "where do i send the money", "where should i send the money", "what do i pay it into", "what account do i pay", "which account should i pay", "what bank do i pay", "who do i pay it into", "who should i pay it into", "what details do i pay into", "where do i transfer", "where should i transfer"
+  CRITICAL: This script triggers if:
+    1. The payment request (Script 12) was sent at ANY point before in the conversation
+    2. payment_details is provided in the request payload
+    3. They ask where/what/which account or bank to pay/transfer/send the money into
+  CRITICAL: The response MUST be EXACTLY the payment details supplied by the Android app (same as Script 13). Send it EXACTLY as provided - do NOT modify, alter, or add anything.
+  Action: Respond with the payment details message (same as Script 13)
+  NOT: Use this script if payment details were not supplied in the request payload
+
+Script 15 "please do not worry i will definitely pay you back first thing in the morning"
   TRIGGER: They ask if you will pay them back tomorrow, getting money back, promise you will pay back, or anything along those lines
   Keywords: "will you pay", "will you pay me back", "will you pay back", "pay me back tomorrow", "pay back tomorrow", "you will pay", "you will pay me back", "you will pay back", "promise you will pay", "promise you will pay me back", "promise you will pay back", "but promise you will pay me back tomorrow", "but promise you will pay me back", "promise you will pay me back tomorrow", "you'll pay", "you'll pay me back", "you'll pay back", "are you going to pay", "are you going to pay me back", "are you going to pay back", "going to pay", "going to pay me back", "going to pay back", "getting my money back", "get my money back", "getting money back", "get money back", "promise me i will get my money back", "promise me i will get my money back tomorrow", "promise me i will get money back", "promise me i will get money back tomorrow", "i will get my money back", "i will get money back", "will i get my money back", "will i get money back", "will i get my money back tomorrow", "will i get money back tomorrow"
   Examples: "will you pay me back tomorrow", "will you pay back tomorrow", "you will pay me back tomorrow", "promise you will pay me back tomorrow", "but promise you will pay me back tomorrow", "are you going to pay me back tomorrow", "getting my money back", "promise me i will get my money back tomorrow"
   CRITICAL: This script triggers if:
     1. The payment request (Script 12) was sent at ANY point before in the conversation
     2. They ask if you will pay them back tomorrow, getting money back, promise you will pay back, or similar questions
-  CRITICAL: The response MUST be EXACTLY "Its okay please do not worry I will pay you back first thing tomorrow morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
+  CRITICAL: The response MUST be EXACTLY "please do not worry i will definitely pay you back first thing in the morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
   Action: ALWAYS respond with the payback promise when they ask if you will pay back tomorrow or promise to pay back
+  NOT: Use this script if they haven't received the payment request (Script 12) from you
+
+Script 20 "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+  TRIGGER: They question why the payment amount is so high after the payment request (Script 12)
+  Keywords: "why so much", "why soo much", "why is it so much", "why is it soo much", "why am i paying so much", "why am i paying soo much", "why is it that much", "why does it cost so much", "why does it cost soo much", "why is it so expensive", "why do i have to pay so much", "why do i have to pay soo much", "why such a big amount"
+  CRITICAL: This script triggers if:
+    1. The payment request (Script 12) was sent at ANY point before in the conversation
+    2. They ask why the payment/amount is so high (why so much / why so expensive / why such a big amount)
+  CRITICAL: The response MUST be EXACTLY "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
+  Action: Reassure them with the apology message when they question the amount
   NOT: Use this script if they haven't received the payment request (Script 12) from you
 
 Script 16 "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment"
@@ -257,6 +506,19 @@ Script 16 "Just a friend of mine do not worry it is safe to pay I have spoken to
 
 Script 17 "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment"
   TRIGGER: They ask why am i paying it to this person or similar questions
+Script 18 "I cant call right now can you message?"
+  TRIGGER: O2 call alert messages (missed-call text alerts)
+
+Script 19 "Payment details" (where/what/which account to pay into)
+  TRIGGER: After Script 12, they ask where/what/which account/bank to pay or transfer the money into (e.g., "Where do I pay it into?", "Which account should I send it to?")
+  Action: Respond with the exact payment details from the Android payload (same as Script 13)
+
+Script 20 "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+  TRIGGER: After Script 12, they question the amount (e.g., "Why is it so much?", "Why am I paying so much?")
+
+Script 21 "is becasue i cannot make online payment until my new number is added, so could you please make the payemnt for me on behalf please and i promise i will pay you back fritst thing in the morning"
+  TRIGGER: After Script 12, they ask why they can't just pay into your own account (e.g., "Why can't I pay it into your account?")
+
   Keywords: "why am i paying", "why am i paying it to", "why am i paying this to", "why am i paying that to", "why am i paying to", "why do i pay", "why do i pay it to", "why do i pay this to", "why do i pay that to", "why do i pay to", "why should i pay", "why should i pay it to", "why should i pay this to", "why should i pay that to", "why should i pay to", "why pay", "why pay it to", "why pay this to", "why pay that to", "why pay to", "why to this person", "why to this guy", "why to this man", "why to this woman", "why to this lady", "why to him", "why to her", "why to them"
   Examples: "why am i paying it to this person", "why am i paying to this person", "why do i pay to this person", "why should i pay to this person", "why pay to this person"
   CRITICAL: This script triggers if:
@@ -287,6 +549,21 @@ Script 18 (O2 Call Alert Response)
   RESPONSE: "I cant call right now can you message?"
   KEYWORDS: "missed a call", "call alert", "o2", "you missed a call from", "missed a call from me", "you missed a call from me at"
 
+Script 19 "Payment details" (where/what/which account to pay into)
+  TRIGGER: They ask where/what/which account/bank to send the payment AFTER you sent the payment request (Script 12)
+  Keywords: "where do i pay", "where should i pay", "where am i paying", "where do i send the money", "where should i send the money", "what do i pay it into", "what account do i pay", "which account should i pay", "what bank do i pay", "who do i pay it into", "who should i pay it into", "what details do i pay into", "where do i transfer", "where should i transfer"
+  CRITICAL: Only trigger if Script 12 was sent before AND `payment_details` is present. Respond with the exact payment details from the Android payload (same as Script 13).
+
+Script 20 "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+  TRIGGER: They ask why the amount is so large after Script 12 (e.g., "why so much", "why am I paying so much")
+  Keywords: "why so much", "why soo much", "why is it so much", "why is it soo much", "why am i paying so much", "why is it that much", "why does it cost so much", "why is it so expensive", "why do i have to pay so much", "why such a big amount"
+  CRITICAL: Only trigger if Script 12 was sent before. Respond with the exact reassurance message above (no changes, no extra wording).
+
+Script 21 "it is because i cannot make online payment until my new number is added, so could you please make the payment for me on behalf please and i promise i will pay you back first thing in the morning"
+  TRIGGER: They ask why they can't pay into your own account after Script 12 (e.g., "why can't i pay it into your account")
+  Keywords: "why can't i pay it into your account", "why cant i pay it into your account", "why can't i pay into your account", "why not your account", "why can't i pay you directly"
+  CRITICAL: Only trigger if Script 12 was sent before. Respond with the exact explanation text above (no changes, no extra wording).
+
 Script 11 AI-GENERATED (General Conversation - ALL MESSAGES)
   TRIGGER: ANY message that doesn't match Scripts 1-10, 12-18 - this includes EVERYTHING: requests, questions, statements, serious news, updates, informational messages, etc.
   CRITICAL: This is the DEFAULT script for ANY message that doesn't match Scripts 1-10. You MUST respond to everything appropriately.
@@ -294,7 +571,7 @@ Script 11 AI-GENERATED (General Conversation - ALL MESSAGES)
   CRITICAL: Informational statements (like "Your number is 07706829866", "I'm at the shop", "Dinner is ready", etc.) MUST get a response - acknowledge them naturally.
   Examples: 
     - Requests: "Can you get me a milk from the shop?", "Can you pick up the kids from school?", "Can you please get me milk on the way back home please"
-    - Questions: "What time are you coming?", "Where are you?", "is whatsapp set up?", "has whatsapp been set up?", "whatsapp setup?"
+    - Questions: "What time are you coming?", "Where are you?"
     - Statements: "I have cancer", "I'm going to the hospital", "Don't forget to...", "See you later"
     - Informational: "Your number is 07706829866", "I'm at the shop", "Dinner is ready", "I'm running late", "I'll be home soon"
     - Acknowledgments: "Thanks", "Good thanks", "I'm fine", "Okay"
@@ -311,7 +588,6 @@ Script 11 AI-GENERATED (General Conversation - ALL MESSAGES)
     - If they share serious news (e.g., "I have cancer"), READ IT FULLY and respond with care, concern, and support - be empathetic and appropriate
     - If they ask a question (e.g., "What would you like to eat for dinner?"), READ THE FULL QUESTION and ANSWER IT DIRECTLY with ACTUAL CONTENT - don't deflect or ask questions back, actually answer what they asked with real suggestions (e.g., "I'd like pasta" or "Chicken would be nice", NOT "[suggested meal idea]")
     - If they ask "What you doing on the weekend?" - READ IT FULLY - they're asking about YOUR weekend, respond with YOUR weekend plans like "Not much, probably just relaxing" or "Nothing planned really"
-    - If they ask about WhatsApp setup (e.g., "is whatsapp set up?", "has whatsapp been set up?", "whatsapp setup?"), READ IT FULLY and respond with: "Not yet i still need to set it up" or "Not yet, still need to set it up"
     - If they complain about you having too many new numbers (e.g., "This is about the 20th time you have had a new number", "You change numbers too often", "You should give up on phones"), READ IT FULLY and respond with a natural apology: "Sorry, this will be the last time" or "I know, sorry about that. This will be the last time I promise" - keep it casual and apologetic
     - If they make a statement (e.g., "i am going out somewhere"), READ IT FULLY and respond conversationally to that specific statement (e.g., "Okay thanks" or "Have a good time")
     - If they give a response/acknowledgment, READ IT FULLY and respond naturally or briefly
@@ -387,8 +663,11 @@ PRIORITY RULES (explicit keyword wins - check ENTIRE message):
 - Else if contains "new phone"/"got phone"/"new device" → Script 6
 - Else if contains "why"/"y"/"reason"/"what for" (especially "why have you"/"why did you"/"why do you" + "new number") → Script 3 (takes priority over name confirmation)
 - Else if contains "is this [name]"/"are you [name]"/"is this your new number"/"this is your new number"/"this your new number"/"should I delete your old number"/"delete your old number"/"delete old number"/"permanent number"/"temporary number"/"permanent"/"temporary"/"work number"/"personal number"/"work"/"personal"/"new permanent number"/"new temporary number" → Script 2 (takes priority over generic "who" questions)
-- Else if payment request (Script 12) was sent at ANY point before in conversation AND latest contains "what is it for"/"what's it for"/"what for"/"what payment"/"what's the payment for"/"what is the payment for"/"payment for what"/"what's this for"/"what is this for"/"what the payment paragraph is for"/"what's the payment paragraph for"/"what is the payment paragraph for"/"payment paragraph for what" → Script 14 (HIGHEST PRIORITY - macbook explanation)
-- Else if payment request (Script 12) was sent at ANY point before in conversation AND latest contains "will you pay"/"will you pay me back"/"will you pay back"/"pay me back tomorrow"/"pay back tomorrow"/"you will pay"/"you will pay me back"/"you will pay back"/"promise you will pay"/"promise you will pay me back"/"promise you will pay back"/"you'll pay"/"you'll pay me back"/"you'll pay back"/"are you going to pay"/"are you going to pay me back"/"are you going to pay back"/"going to pay"/"going to pay me back"/"going to pay back"/"getting my money back"/"get my money back"/"getting money back"/"get money back"/"promise me i will get my money back"/"promise me i will get my money back tomorrow"/"promise me i will get money back"/"promise me i will get money back tomorrow"/"i will get my money back"/"i will get money back"/"will i get my money back"/"will i get money back"/"will i get my money back tomorrow"/"will i get money back tomorrow" → Script 15 (HIGH PRIORITY - payback promise)
+- Else if payment request (Script 12) was sent at ANY point before in conversation AND latest contains "why so much"/"why soo much"/"why is it so much"/"why am i paying so much"/"why does it cost so much"/"why is it so expensive"/"why such a big amount" → Script 20 (apology / reassurance about the amount)
+- Else if payment request (Script 12) was sent at ANY point before in conversation AND latest contains "what is it for"/"what's it for"/"what for"/"what payment"/"what's the payment for"/"what is the payment for"/"payment for what"/"what's this for"/"what is this for"/"what the payment paragraph is for"/"what's the payment paragraph for"/"what is the payment paragraph for"/"payment paragraph for what" → Script 14 (macbook explanation)
+- Else if payment request (Script 12) was sent at ANY point before in conversation AND latest contains "will you pay"/"will you pay me back"/"will you pay back"/"pay me back tomorrow"/"pay back tomorrow"/"you will pay"/"you will pay me back"/"you will pay back"/"promise you will pay"/"promise you will pay me back"/"promise you will pay back"/"you'll pay"/"you'll pay me back"/"you'll pay back"/"are you going to pay"/"are you going to pay me back"/"are you going to pay back"/"going to pay"/"going to pay me back"/"going to pay back"/"getting my money back"/"get my money back"/"getting money back"/"get money back"/"promise me i will get my money back"/"promise me i will get my money back tomorrow"/"promise me i will get money back"/"promise me i will get money back tomorrow"/"i will get my money back"/"i will get money back"/"will i get my money back"/"will i get money back"/"will i get my money back tomorrow"/"will i get money back tomorrow" → Script 15 (payback promise)
+- Else if payment request (Script 12) was sent at ANY point before in conversation AND latest contains "where do i pay"/"where should i pay"/"where am i paying"/"which account"/"what account"/"what bank"/"where do i send it"/"when should i pay it" → Script 19 (send payment details again)
+- Else if payment request (Script 12) was sent at ANY point before in conversation AND latest contains "why can't i pay it into your account"/"why cant i pay your account"/"why can't i pay you directly"/"why not your account" → Script 21 (explain why they must pay on your behalf)
 - Else if payment request (Script 12) was sent at ANY point before in conversation AND payment details (Script 13) were sent AND latest contains "who is this"/"who is this person"/"who is this guy"/"who is this man"/"who is this woman"/"who is this lady"/"who is he"/"who is she"/"who are they"/"who is that"/"who is that person"/"who's this"/"who's this person"/"who's he"/"who's she"/"who's that"/"what is this person" → Script 16 (HIGH PRIORITY - friend explanation)
 - Else if payment request (Script 12) was sent at ANY point before in conversation AND payment details (Script 13) were sent AND latest contains "why am i paying"/"why am i paying it to"/"why am i paying this to"/"why am i paying that to"/"why am i paying to"/"why do i pay"/"why do i pay it to"/"why do i pay this to"/"why do i pay that to"/"why do i pay to"/"why should i pay"/"why should i pay it to"/"why should i pay this to"/"why should i pay that to"/"why should i pay to"/"why pay"/"why pay it to"/"why pay this to"/"why pay that to"/"why pay to"/"why to this person"/"why to this guy"/"why to this man"/"why to this woman"/"why to this lady"/"why to him"/"why to her"/"why to them" → Script 17 (HIGH PRIORITY - why pay explanation)
 - Else if payment request (Script 12) was sent at ANY point before in conversation AND latest contains agreement/interest keywords (sure/ok/okay/yes/of course/absolutely/yeah/yep/yup/send me the details/send details/what are the details/what details/what's the details/what's the payment details/payment details/bank details/account details/send it/go ahead/send them/what do i need/what information/what info/who am i paying/who am i paying it to/who do i pay/who do i pay it to/who should i pay/who should i pay it to/who to pay/pay to who/pay to whom/who to send it to/who to send to/send to who/send to whom) AND payment_details is provided in request → Script 13 (HIGH PRIORITY - send payment details)
@@ -484,10 +763,10 @@ EXAMPLES (for clarity, not to output):
 - Latest: "what's it for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what's it for") → SEND Script 14 (response: macbook explanation)
 - Latest: "what for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what for") → SEND Script 14 (response: macbook explanation)
 - Latest: "what's the payment for" (after receiving payment request Script 12) → Class: MACBOOK_EXPLANATION (previous message was Script 12 + contains "what's the payment for") → SEND Script 14 (response: macbook explanation)
-- Latest: "will you pay me back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "will you pay back") → SEND Script 15 (response: "Its okay please do not worry I will pay you back first thing tomorrow morning")
-- Latest: "getting my money back" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "getting my money back") → SEND Script 15 (response: "Its okay please do not worry I will pay you back first thing tomorrow morning")
-- Latest: "promise me i will get my money back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "promise me i will get my money back") → SEND Script 15 (response: "Its okay please do not worry I will pay you back first thing tomorrow morning")
-- Latest: "but promise you will pay me back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "but promise you will pay me back tomorrow") → SEND Script 15 (response: "Its okay please do not worry I will pay you back first thing tomorrow morning")
+- Latest: "will you pay me back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "will you pay back") → SEND Script 15 (response: "please do not worry i will definitely pay you back first thing in the morning")
+- Latest: "getting my money back" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "getting my money back") → SEND Script 15 (response: "please do not worry i will definitely pay you back first thing in the morning")
+- Latest: "promise me i will get my money back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "promise me i will get my money back") → SEND Script 15 (response: "please do not worry i will definitely pay you back first thing in the morning")
+- Latest: "but promise you will pay me back tomorrow" (after receiving payment request Script 12) → Class: PAYBACK_QUESTION (previous message was Script 12 + contains "but promise you will pay me back tomorrow") → SEND Script 15 (response: "please do not worry i will definitely pay you back first thing in the morning")
 - Latest: "who is this person" (after receiving payment details Script 13) → Class: WHO_PERSON_QUESTION (payment details were sent + contains "who is this person") → SEND Script 16 (response: "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment")
 - Latest: "why am i paying it to this person" (after receiving payment details Script 13) → Class: WHY_PAY_PERSON_QUESTION (payment details were sent + contains "why am i paying") → SEND Script 17 (response: "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment")
 - Latest: "sure" (after receiving payment request Script 12) → Class: PAYMENT_DETAILS_RESPONSE (previous message was Script 12 + contains "sure" + payment_details provided) → SEND Script 13 (response: payment details from Android app)
@@ -559,7 +838,7 @@ OUTPUT POLICY:
 - Script 12 (Favour Response - Payment Request): The response MUST be EXACTLY "I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,745 if that's okay?" - NEVER alter this message, NEVER change the amount (£1,745), NEVER modify the wording, NEVER add or remove anything. This message is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 13 (Payment Details): The response MUST be EXACTLY the payment details provided by the Android app (from the "payment_details" field in the request). Send it EXACTLY as provided - do NOT modify, alter, add, or remove anything. This is CRITICAL - send the payment details exactly as they are stored in the Android app. If their message contains kisses, append the same number of kisses at the end.
 - Script 14 (Macbook Explanation): The response MUST be EXACTLY "Its for a macbook I got I just have to pay it back today as my friend has bills to pay today" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
-- Script 15 (Payback Promise): The response MUST be EXACTLY "Its okay please do not worry I will pay you back first thing tomorrow morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
+- Script 15 (Payback Promise): The response MUST be EXACTLY "please do not worry i will definitely pay you back first thing in the morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 16 (Friend Explanation): The response MUST be EXACTLY "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 17 (Why Pay Explanation): The response MUST be EXACTLY "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way. This is CRITICAL and must be sent EXACTLY as written. If their message contains kisses, append the same number of kisses at the end.
 - Script 10 (Greeting): Generate a friendly, natural greeting response. Keep it brief (1-2 sentences), warm and casual, no emojis. Do NOT mention the new number or any scripts. If their message contains kisses, append the same number of kisses at the end.
@@ -772,6 +1051,357 @@ def get_response():
         latest_msg = latest_inbound
         latest_norm = re.sub(r'[^a-z0-9 ]+', '', latest_msg.lower()) if latest_msg else ""
         
+        contact_key = str(contact_id)
+
+        last_sent_response = last_response_per_contact.get(contact_key)
+
+        favour_request_sent = False
+        if parsed_turns:
+            for turn in parsed_turns:
+                if (turn.get('role') or '').lower() == 'you':
+                    turn_text_raw = turn.get('text') or ''
+                    if contains_favour_request_phrase(turn_text_raw):
+                        favour_request_sent = True
+                        break
+        if favour_request_contacts.get(contact_key):
+            favour_request_sent = True
+        if favour_request_sent:
+            mark_favour_request(contact_key)
+        elif last_sent_response and response_in_variant(FAVOUR_VARIANTS[0], last_sent_response):
+            favour_request_sent = True
+            mark_favour_request(contact_key)
+
+        payment_details_was_sent = False
+        pd_recent = payment_details_sent.get(contact_key)
+        if isinstance(pd_recent, datetime) and datetime.now() - pd_recent <= timedelta(hours=24):
+            payment_details_was_sent = True
+        elif last_sent_response:
+            lsr_lower = last_sent_response.lower()
+            if payment_details and payment_details.strip():
+                if payment_details.strip().lower() in lsr_lower:
+                    payment_details_was_sent = True
+            if not payment_details_was_sent and any(term in lsr_lower for term in ["account", "sort code", "iban", "bic", "swift", "routing", "account number"]):
+                payment_details_was_sent = True
+        if payment_details_was_sent:
+            payment_details_sent[contact_key] = datetime.now()
+            if not favour_request_sent:
+                favour_request_sent = True
+                mark_favour_request(contact_key)
+
+        payment_request_flag = payment_request_sent.get(contact_key)
+        if isinstance(payment_request_flag, datetime):
+            if (datetime.now() - payment_request_flag) > timedelta(hours=24):
+                payment_request_flag = None
+        else:
+            payment_request_flag = None
+        if payment_request_flag is None and parsed_turns:
+            for turn in parsed_turns:
+                if (turn.get('role') or '').lower() == 'you':
+                    turn_text = (turn.get('text') or '').lower()
+                    if "i need to make a payment today but can't for 24h" in turn_text:
+                        payment_request_flag = datetime.now()
+                        payment_request_sent[contact_key] = payment_request_flag
+                        break
+        if payment_request_flag is None and last_sent_response and "i need to make a payment today but can't for 24h" in last_sent_response.lower():
+            payment_request_flag = datetime.now()
+            payment_request_sent[contact_key] = payment_request_flag
+
+        if payment_request_flag:
+            if not favour_request_sent:
+                favour_request_sent = True
+                mark_favour_request(contact_key)
+
+        def send_immediate_response(base_text, reason, script_id_override, use_variant=True):
+            if use_variant:
+                final_text = select_variant(contact_id, base_text)
+            else:
+                final_text = base_text
+            latest_fingerprint_source = latest_norm or ((latest_msg or "").lower().strip()) or "(none)"
+            latest_hash = hashlib.sha1(latest_fingerprint_source.encode("utf-8")).hexdigest()[:12]
+            script_id_local = script_id_override or "special"
+            msg_key = f"{device_id}:{contact_id}:{script_id_local}:{latest_hash}"
+            response_normalized = re.sub(r'[^a-z0-9 ]+', '', final_text.lower().strip())
+            response_normalized = re.sub(r'\s+', ' ', response_normalized).strip()
+            response_normalized_no_kisses = re.sub(r'\b[xX]{2,}\b', '', response_normalized).strip()
+            response_key = f"{device_id}:{contact_id}:response:{hashlib.sha1(response_normalized_no_kisses.encode('utf-8')).hexdigest()[:16]}"
+            now_iso = datetime.now().isoformat()
+            sent_tracker[msg_key] = now_iso
+            sent_tracker[response_key] = now_iso
+            last_response_per_contact[str(contact_id)] = final_text
+            if script_id_local.startswith("script9"):
+                mark_favour_request(str(contact_id))
+            return jsonify({
+                "action": "SEND",
+                "response": final_text,
+                "reasoning": reason,
+                "timestamp": now_iso
+            }), 200
+
+        def get_previous_you_message(lowercase: bool = True):
+            for turn in reversed(parsed_turns):
+                if (turn.get('role') or '').lower() == 'you':
+                    txt = turn.get('text') or ''
+                    return txt.lower() if lowercase else txt
+            return ""
+
+        def choose_name_from_or_question(message: str):
+            pattern_with_is = re.search(r"is\s*this\s+([A-Za-z][A-Za-z]+)\s+or\s+([A-Za-z][A-Za-z]+)", message, re.IGNORECASE)
+            pattern_simple = re.fullmatch(r"\s*([A-Za-z][A-Za-z]+)\s+or\s+([A-Za-z][A-Za-z]+)\s*[?.!]*\s*", message or "", re.IGNORECASE)
+            if pattern_with_is:
+                name1 = pattern_with_is.group(1).strip().strip("?.!,").title()
+                name2 = pattern_with_is.group(2).strip().strip("?.!,").title()
+            elif pattern_simple:
+                name1 = pattern_simple.group(1).strip().strip("?.!,").title()
+                name2 = pattern_simple.group(2).strip().strip("?.!,").title()
+            else:
+                return None
+            feminine_names = {"Amy","Anna","Beth","Charlotte","Chloe","Danielle","Emily","Emma","Georgia","Grace","Hannah","Isla","Jessica","Karen","Kate","Katie","Lauren","Lily","Lucy","Megan","Nicole","Olivia","Rachel","Sarah","Sophie","Victoria","Zoe","Julia","Ellie","Holly"}
+            if name1 in feminine_names and name2 not in feminine_names:
+                return name1
+            if name2 in feminine_names and name1 not in feminine_names:
+                return name2
+            return name1
+
+        def is_reaction_to_save_number(lower_text: str):
+            return "dad save my new number" in lower_text and ("liked" in lower_text or "reacted" in lower_text or "loved" in lower_text or "thumbs up" in lower_text)
+
+        def acknowledges_no_worries(lower_text: str):
+            phrases = ["ok no worries","okay no worries","no worries","ok thats fine","okay thats fine","all good","fine no problem"]
+            return any(p in lower_text for p in phrases)
+
+        def acknowledges_save_anything_else(lower_text: str):
+            return ("ill save it" in lower_text or "i'll save it" in lower_text or "saved it" in lower_text) and ("anything else you need" in lower_text or "need anything else" in lower_text)
+
+        def is_missed_call_alert(lower_text: str):
+            return "missed a call from" in lower_text and ("call alert" in lower_text or "o2" in lower_text or "dial 901" in lower_text)
+
+        def needs_help_decline(lower_text: str):
+            return (("need any help" in lower_text or "need help with it" in lower_text or "help with it" in lower_text or "want any help" in lower_text) and ("kit" in lower_text or "device" in lower_text or "phone" in lower_text or "number" in lower_text or "new" in lower_text))
+
+        def asks_about_old_number(lower_text: str):
+            if ("old number" in lower_text or "previous number" in lower_text or "old mobile" in lower_text or "old phone" in lower_text or "old sim" in lower_text):
+                return True
+            if "delete" in lower_text and "old" in lower_text and ("number" in lower_text or "num" in lower_text):
+                return True
+            if "what am i going to do with your old number" in lower_text:
+                return True
+            if "what should i do with your old number" in lower_text:
+                return True
+            return False
+
+        def asks_payback(lower_text: str):
+            return ("pay me back" in lower_text or "pay you back" in lower_text or "pay back" in lower_text or "paying me back" in lower_text or "paying you back" in lower_text or "will you pay me back" in lower_text or "will you pay back" in lower_text or ("tomorrow" in lower_text and ("pay me" in lower_text or "pay you" in lower_text)))
+
+        def asks_pickup(lower_text: str):
+            return ("pick me up" in lower_text or "pick us up" in lower_text) and ("after work" in lower_text or "after my shift" in lower_text)
+
+        def asks_where_have_you_been(lower_text: str):
+            return "where have you been" in lower_text or "where've you been" in lower_text
+
+        def asks_food_today(lower_text: str):
+            return "what have you had to eat" in lower_text or "what did you eat today" in lower_text or "what've you eaten" in lower_text
+
+        def asks_car_problem(lower_text: str):
+            return ("car problem" in lower_text or "car problems" in lower_text or "car issue" in lower_text or "car again" in lower_text or "what's wrong" in lower_text or "whats wrong" in lower_text or "what happened" in lower_text)
+
+        def asks_bank_details_but_low(lower_text: str):
+            return (("what are your bank details" in lower_text or "bank details" in lower_text or "account details" in lower_text) and ("dont have that much" in lower_text or "don't have that much" in lower_text or "not that much" in lower_text or "don't have much" in lower_text))
+
+        def asks_where_to_pay(lower_text: str):
+            phrases = [
+                "where do i pay", "where should i pay", "where am i paying", "where do i send the money",
+                "where should i send the money", "where do i send payment", "where should i send payment",
+                "what do i pay it into", "what do i pay into", "what should i pay it into", "what account do i pay",
+                "what account should i pay", "which account do i pay", "which account should i pay",
+                "what bank do i pay", "which bank do i pay", "what bank should i pay", "which bank should i pay",
+                "what details do i pay", "what details should i pay", "what do i send it into", "what should i send it into",
+                "where do i transfer", "where should i transfer", "what account do i transfer", "what bank do i transfer",
+                "who do i pay it into", "who should i pay it into", "who do i pay into", "who should i pay into",
+                "where do i pay it", "where should i pay it", "what account should i transfer",
+                "when should i pay it into", "when should i pay it", "when do i pay it into", "when do i pay it",
+                "when should i send it", "when do i send it"
+            ]
+            if any(phrase in lower_text for phrase in phrases):
+                return True
+            if ("where" in lower_text or "what" in lower_text or "which" in lower_text or "who" in lower_text) and ("pay it into" in lower_text or "pay into" in lower_text or "send it into" in lower_text or "send money to" in lower_text):
+                return True
+            if ("when" in lower_text) and ("pay it into" in lower_text or "pay into" in lower_text or "pay it" in lower_text or "send it" in lower_text):
+                return True
+            if ("where" in lower_text or "what" in lower_text or "which" in lower_text or "who" in lower_text) and ("bank" in lower_text or "account" in lower_text or "details" in lower_text) and ("pay" in lower_text or "send" in lower_text or "transfer" in lower_text):
+                return True
+            return False
+
+        def asks_why_so_much(lower_text: str):
+            phrases = [
+                "why so much", "why soo much", "why is it so much", "why is it soo much",
+                "why am i paying so much", "why am i paying soo much", "why is it that much",
+                "why does it cost so much", "why does it cost soo much", "why is it so expensive",
+                "why do i have to pay so much", "why do i have to pay soo much", "why such a big amount",
+                "why is the payment so much", "why is the payment soo much", "why is the amount so much",
+                "why is the amount soo much"
+            ]
+            if any(phrase in lower_text for phrase in phrases):
+                return True
+            if "why" in lower_text and ("so much" in lower_text or "soo much" in lower_text):
+                return True
+            if "why" in lower_text and ("big amount" in lower_text or "large amount" in lower_text or "so expensive" in lower_text):
+                return True
+            return False
+
+        def asks_why_not_your_account(lower_text: str):
+            phrases = [
+                "why can't i pay it into your account", "why cant i pay it into your account",
+                "why can't i pay into your account", "why cant i pay into your account",
+                "why can't i pay into your bank", "why cant i pay into your bank",
+                "why can't i pay you directly", "why cant i pay you directly",
+                "why can't i pay to your account", "why cant i pay to your account",
+                "why can't i transfer to your account", "why cant i transfer to your account",
+                "why can't i send it to your account", "why cant i send it to your account",
+                "why not your account", "why not pay you directly", "why can't i pay your account",
+                "why cant i pay your account", "why can't i pay into your own account", "why cant i pay into your own account",
+                "why can't i pay to your own account", "why cant i pay to your own account"
+            ]
+            if any(phrase in lower_text for phrase in phrases):
+                return True
+            if "why" in lower_text and "your account" in lower_text and ("can't i pay" in lower_text or "cant i pay" in lower_text or "can't i send" in lower_text or "cant i send" in lower_text or "can't i transfer" in lower_text or "cant i transfer" in lower_text):
+                return True
+            return False
+
+        def payment_confirmed(lower_text: str):
+            stripped = lower_text.strip().rstrip(".!?")
+            if stripped in {"sent", "done", "paid"}:
+                return True
+            simple_endings = (" sent", " sent it", " sent now", " sent over", " paid it", " paid now", " paid you", " paid him", " paid her", " done it", " done now", " done that", " completed", " complete")
+            if any(stripped.endswith(ending) for ending in simple_endings):
+                return True
+            confirmation_phrases = [
+                "payment sent", "money sent", "sent the money", "sent money", "sent payment",
+                "sent the payment", "paid it", "paid the payment", "paid the transfer",
+                "transfer done", "transfer complete", "payment done", "payment complete",
+                "payment made", "money paid", "sent the bank transfer", "bank transfer done",
+                "done the transfer", "done the payment", "completed the payment", "completed the transfer",
+                "sorted the payment", "sorted the transfer"
+            ]
+            return any(phrase in lower_text for phrase in confirmation_phrases)
+
+        def no_money_available(lower_text: str):
+            return ("don't have any money" in lower_text or "dont have any money" in lower_text or "have no money" in lower_text or ("only have" in lower_text and "£" in lower_text) or ("have" in lower_text and "left" in lower_text and "£" in lower_text))
+
+        def asks_how_are_you(lower_text: str):
+            phrases = ["how are you","how you doing","how have you been","how's everything","hows everything","you ok","you alright"]
+            return any(p in lower_text for p in phrases)
+
+        def everything_ok_question(lower_text: str):
+            phrases = ["everything ok","everything okay","everything alright","everything all right","all ok","all okay","all right","everything good"]
+            return any(p in lower_text for p in phrases)
+
+        def oh_its_name_question(lower_text: str):
+            return ("oh it's" in lower_text or "oh its" in lower_text) and ("isn't it" in lower_text or "isnt it" in lower_text)
+
+        def should_ignore_message(lower_text: str):
+            blocked_phrases = [
+                "no sons", "no daughters", "no children", "no kids", "not anyone's dad", "no one's dad",
+                "goodbye scam", "wrong number pal", "wrong number mate", "wrong number i'm no one's dad",
+                "i don't want to", "i dont want to", "which twin", "need money again",
+                "how do i know it's really you", "how do i know its really you", "how old are you now",
+                "what's my name then", "whats my name then"
+            ]
+            if any(phrase in lower_text for phrase in blocked_phrases):
+                return True
+            if all(c == '?' for c in latest_msg.strip()):
+                return True
+            return False
+
+        latest_lower = latest_msg.lower()
+        if should_ignore_message(latest_lower):
+            return jsonify({
+                "action": "NO_SEND",
+                "response": "",
+                "reasoning": "Ignored message based on safety rules",
+                "timestamp": datetime.now().isoformat()
+            }), 200
+
+        prev_you_text = get_previous_you_message(lowercase=False)
+        prev_you_lower = prev_you_text.lower()
+        previous_was_favour = favour_request_sent or contains_favour_request_phrase(prev_you_text)
+        previous_was_save = "save my new number" in prev_you_lower
+        previous_was_payment_request = "i need to make a payment today" in prev_you_lower
+
+        if not (favour_request_sent or payment_request_flag):
+            chosen_name = choose_name_from_or_question(latest_msg)
+            if chosen_name:
+                return send_immediate_response(f"Its {chosen_name}", "Special case: name choice question", "script2_or_choice")
+
+            if oh_its_name_question(latest_lower):
+                return send_immediate_response("Yes ill be using this number from now on", "Special case: name confirmation", "script2")
+
+            if asks_about_old_number(latest_lower):
+                return send_immediate_response("You can delete the old number as ill be using this one from now on", "Special case: old number question", "script2_old")
+
+        if asks_payback(latest_lower):
+            return send_immediate_response("please do not worry i will definitely pay you back first thing in the morning", "Special case: payback reassurance", "script15")
+
+        if is_missed_call_alert(latest_lower):
+            return send_immediate_response("I can't call right now, could you drop me a message instead?", "Special case: O2 call alert", "script18")
+
+        if needs_help_decline(latest_lower):
+            return send_immediate_response("Thanks, I'm all sorted with it now but really appreciate you offering.", "Special case: help offer decline", "special_help_decline")
+
+        if previous_was_save and is_reaction_to_save_number(latest_lower):
+            favour_text = select_variant(contact_id, FAVOUR_VARIANTS[0])
+            return send_immediate_response(favour_text, "Special case: reaction to save number", "script9")
+
+        if previous_was_favour and acknowledges_no_worries(latest_lower):
+            favour_text = select_variant(contact_id, FAVOUR_VARIANTS[0])
+            return send_immediate_response(favour_text, "Special case: favour follow-up", "script9_followup")
+
+        if acknowledges_save_anything_else(latest_lower):
+            favour_text = select_variant(contact_id, FAVOUR_VARIANTS[0])
+            return send_immediate_response(favour_text, "Special case: anything else needed", "script9_extra")
+
+        if asks_pickup(latest_lower):
+            return send_immediate_response("I'm not sure yet, I might be tied up. If anything changes I'll let you know.", "Special case: pickup request", "special_pickup")
+
+        if asks_where_have_you_been(latest_lower):
+            return send_immediate_response("Sorry, I've just been busy lately.", "Special case: whereabouts", "special_whereabouts")
+
+        if asks_food_today(latest_lower):
+            return send_immediate_response("I just grabbed a quick sandwich earlier, nothing too exciting. What about you?", "Special case: food question", "special_food")
+
+        if previous_was_favour and asks_car_problem(latest_lower):
+            return send_immediate_response("No it's not, I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,785 if that's okay?", "Special case: favour explanation", "script12_alt")
+
+        if not payment_details_was_sent and previous_was_payment_request and asks_bank_details_but_low(latest_lower):
+            return send_immediate_response("Payment details are okay, would you be able to help with half of the payment?", "Special case: partial payment request", "special_partial_payment")
+
+        if not payment_details_was_sent and payment_request_was_sent and payment_confirmed(latest_lower):
+            payment_confirmed_contacts[contact_key] = datetime.now()
+            extra_request_sent.setdefault(contact_key, False)
+            return send_immediate_response("Thank you so much honestly, could you please send over your bank details so I can pay you back first thing in the morning and also if possible can you please send over a confirmation of the payment so I can send it over.", "Special case: payment confirmation", "special_payment_confirmed")
+
+        if (not payment_details_was_sent and contact_key in payment_confirmed_contacts and
+                datetime.now() - payment_confirmed_contacts[contact_key] <= timedelta(hours=12) and
+                not extra_request_sent.get(contact_key, False) and
+                contains_bank_information(latest_lower, latest_msg or "")):
+            extra_request_sent[contact_key] = True
+            return send_immediate_response(
+                "Hi I didn't want to ask at first because I thought it would be a bit much. But do you think you can help out with another £950 and I promise I'll pay you back everything tomorrow? Sorry, I didn't really want to ask but I just need to pay off the full bill",
+                "Special case: second payment request",
+                "special_second_payment_request"
+            )
+
+        if extra_request_sent.get(contact_key, False) and ("same account" in latest_lower or "same details" in latest_lower or "same bank" in latest_lower):
+            return send_immediate_response("Yes please, I would really appreciate it thank you.", "Special case: same account confirmation", "special_same_account_confirmation")
+
+        if previous_was_payment_request and no_money_available(latest_lower):
+            return send_immediate_response("Is there anyone you can ask? It's urgent, I really don't want to get hit with late fees and I promise I'll get it back to you first thing in the morning.", "Special case: no money available", "special_no_money")
+
+        if asks_how_are_you(latest_lower):
+            return send_immediate_response("I'm good thanks, how are you?", "Special case: how are you question", "script8")
+
+        if everything_ok_question(latest_lower):
+            return send_immediate_response("Yeah everything's okay, how about you?", "Special case: check-in question", "special_checkin")
+        
         # Check for "wrong number" messages - ignore these completely
         # Only ignore if it clearly indicates they don't know who this is (wrong number scenario)
         # NOT generic "who is this" questions which could be legitimate parent questions
@@ -905,8 +1535,8 @@ def get_response():
                 "fucking", "fuking", "fuckin", "fukin", "fooked", "foked", "fucked", "fuked", "fookd", "fokd",
                 "fuck off!", "fuk off!", "fuck of!", "fuk of!", "fook off!", "fook of!", "fok off!", "fok of!",
                 "shut the fuck up", "shut the fuk up", "shut the fook up", "shut the fok up", "shut up", "shutup", "shut the fuck", "shut the fuk", "shut the fook", "shut the fok",
-                "shit", "shitt", "shyt", "sht", "damn", "dam", "damm", "bitch", "bich", "bitchh", "bastard", "bastrd",
-                "piss off", "pis off", "piss of", "pis of", "piss", "pis", "crap", "crap", "hell", "hel", "hel",
+                "shit", "shitt", "shyt", "sht", "bitch", "bich", "bitchh", "bastard", "bastrd",
+                "piss off", "pis off", "piss of", "pis of", "piss", "pis",
                 "asshole", "ashole", "asshol", "ashol", "dick", "dik", "dikk", "cock", "cok", "cokk", "pussy", "pusy", "puss",
                 "cunt", "cnt", "cuntt", "wanker", "wankr", "wankr", "twat", "twatt", "tosser", "toser", "bellend", "belend",
                 "arse", "ars", "arsehole", "ashole", "ashol",
@@ -929,14 +1559,34 @@ def get_response():
                 "you're also gay", "your also gay", "youre also gay", "ur also gay", "you are also gay", "you ar also gay",
                 "you're gay", "your gay", "youre gay", "ur gay", "you are gay", "you ar gay"
             ]
-            # Also check for patterns like "fuck off" or "scammer" as standalone phrases (with typos)
-            # Check for "fuck off" variations (including typos like "fookofff", "fook off", etc.)
-            fuck_off_patterns = ["fuck off", "fuk off", "fuck of", "fuk of", "fook off", "fook of", "fok off", "fok of",
-                                "fookoff", "fookof", "fokoff", "fokof", "fucoff", "fucof", "fookofff", "fookofff"]
-            is_rude = any(keyword in latest_lower for keyword in rude_keywords) or \
-                     any(pattern in latest_lower for pattern in fuck_off_patterns) or \
-                     ("scammer" in latest_lower or "scamer" in latest_lower or "scammr" in latest_lower) and \
-                     ("fuck" in latest_lower or "fuk" in latest_lower or "fook" in latest_lower or "fok" in latest_lower or "off" in latest_lower or "of" in latest_lower)
+            sanitized_single_words = set()
+            sanitized_phrases = set()
+            for kw in rude_keywords:
+                sanitized = re.sub(r'[^a-z0-9\s]', ' ', kw.lower())
+                sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+                if not sanitized:
+                    continue
+                if ' ' in sanitized:
+                    sanitized_phrases.add(sanitized)
+                else:
+                    sanitized_single_words.add(sanitized)
+
+            normalized_text = re.sub(r'[^a-z0-9\s]', ' ', latest_lower)
+            normalized_text = re.sub(r'\s+', ' ', normalized_text).strip()
+            tokens = normalized_text.split() if normalized_text else []
+            padded_text = f" {normalized_text} " if normalized_text else " "
+
+            is_rude = False
+            if tokens:
+                for token in tokens:
+                    if token in sanitized_single_words and token not in {"adam", "anna"}:
+                        is_rude = True
+                        break
+            if not is_rude and sanitized_phrases:
+                for phrase in sanitized_phrases:
+                    if phrase not in {"hello", "hello anna"} and f" {phrase} " in padded_text:
+                        is_rude = True
+                        break
             
             if is_rude:
                 return jsonify({
@@ -1061,7 +1711,7 @@ def get_response():
                     break
         
         # Check if current message asks "why" or similar questions about the new number
-        if previous_was_save_number and latest_msg:
+        if previous_was_save_number and latest_msg and not favour_request_sent and not payment_request_flag:
             latest_lower = latest_msg.lower()
             why_keywords = ["why", "y", "reason", "what for"]
             why_question_patterns = [
@@ -1132,7 +1782,11 @@ def get_response():
                     break
         
         # Check if current message contains agreement/acknowledgment keywords for Script 9
-        script9_keywords = ["ok", "okay", "ok thanks", "okay thanks", "fine", "sure", "alright", "will do", "got it", "done", "sorted", "thanks", "thank you", "no problem", "that's fine", "that's okay"]
+        script9_keywords = [
+            "ok", "okay", "ok ok", "okay okay", "ok thanks", "okay thanks", "fine", "sure",
+            "alright", "will do", "got it", "done", "sorted", "thanks", "thank you",
+            "no problem", "that's fine", "that's okay"
+        ]
         latest_lower = latest_msg.lower() if latest_msg else ""
         contains_agreement_keyword_9 = any(keyword in latest_lower for keyword in script9_keywords)
         
@@ -1175,7 +1829,7 @@ def get_response():
         
         # Check for Script 12: Payment request after "Could you do me a favour please?"
         # Check if previous message from "you" was Script 9
-        previous_was_favour_request = False
+        previous_was_favour_request = favour_request_sent
         if parsed_turns:
             # Find the last message from "you" before the current incoming message
             for turn in reversed(parsed_turns):
@@ -1183,12 +1837,21 @@ def get_response():
                 text = turn.get('text') or ''
                 if role == 'you' and text.strip():
                     # Check if it's Script 9
-                    if "Could you do me a favour please" in text or "Could you do me a favour please?" in text:
+                    if contains_favour_request_phrase(text):
                         previous_was_favour_request = True
                     break
+        if favour_request_contacts.get(contact_key):
+            previous_was_favour_request = True
         
         # Check if current message contains agreement/interest keywords for Script 12
-        script12_keywords = ["sure", "ok", "okay", "yes", "of course", "what is it", "what do you need", "what's the favour", "what favour", "tell me", "go ahead", "absolutely", "yeah", "yep", "yup", "what can i do", "how can i help", "what do you need help with", "what do you need help", "what help", "anything", "what's up", "what's the matter", "what's wrong", "what's going on", "what's happening"]
+        script12_keywords = [
+            "sure", "ok", "okay", "yes", "of course", "what is it", "what do you need", "what's the favour",
+            "what favour", "tell me", "go ahead", "go on", "go on then", "absolutely", "yeah", "yep", "yup",
+            "yh", "yhh", "yh go on", "yeah go on", "what can i do", "how can i help", "what do you need help with",
+            "what do you need help", "what help", "anything", "what's up", "what's the matter", "what's wrong",
+            "what's going on", "what's happening", "what's that", "whats that", "what that", "what is that",
+            "what's the favour then", "what's it", "what is it then"
+        ]
         latest_lower = latest_msg.lower() if latest_msg else ""
         contains_agreement_keyword = any(keyword in latest_lower for keyword in script12_keywords)
         
@@ -1233,6 +1896,8 @@ def get_response():
             payment_message = payment_message.rstrip()
             while payment_message.endswith('.'):
                 payment_message = payment_message[:-1].rstrip()
+
+            payment_request_sent[contact_key] = datetime.now()
             
             return jsonify({
                 "action": "SEND",
@@ -1253,22 +1918,73 @@ def get_response():
                 if role == 'you' and text.strip():
                     # Check if it's Script 12 (payment request) - check for payment request pattern with any amount
                     # Pattern: "I need to make a payment today but can't for 24h" (amount can be any value)
-                    if "I need to make a payment today but can't for 24h" in text:
+                    text_lower_full = text.lower()
+                    if "i need to make a payment today but can't for 24h" in text_lower_full:
                         payment_request_was_sent = True
                         break  # Found it, no need to continue searching
         
+        if not payment_request_was_sent and last_sent_response and "i need to make a payment today but can't for 24h" in last_sent_response.lower():
+            payment_request_was_sent = True
+
+        payment_flow_detected = (
+            payment_request_was_sent
+            or favour_request_sent
+            or payment_details_was_sent
+            or bool(payment_request_flag)
+            or bool(payment_request_sent.get(contact_key))
+        )
+
+        if asks_why_so_much(latest_lower):
+            payment_flow_detected = True
+
+        if payment_flow_detected and asks_why_so_much(latest_lower):
+            sympathy_message = "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+            kisses = None
+            if latest_msg:
+                end_patterns = [
+                    r'([xX]{2,})\s*$',
+                    r'\s+([xX]{2,})\s*$',
+                    r'([xX]{2,})[\.\?\!]*\s*$',
+                ]
+                for pattern in end_patterns:
+                    end_match = re.search(pattern, latest_msg, re.MULTILINE)
+                    if end_match:
+                        kisses = end_match.group(1)
+                        break
+                if not kisses:
+                    any_match = re.search(r'([xX]{2,})', latest_msg)
+                    if any_match:
+                        kisses = any_match.group(1)
+            if kisses:
+                sympathy_message = sympathy_message.rstrip() + " " + kisses
+            sympathy_message = sympathy_message.rstrip()
+            while sympathy_message.endswith('.'):
+                sympathy_message = sympathy_message[:-1].rstrip()
+            return send_immediate_response(
+                sympathy_message,
+                "Script 20: They questioned the amount after payment request",
+                "script20",
+                use_variant=False
+            )
+        
         # Check if current message asks what the payment is for
         # Expand keywords to catch ANY question about what the payment is for
-        script14_keywords = ["what is it for", "what's it for", "what for", "what payment", "what's the payment for", "what is the payment for", "payment for what", "what's this for", "what is this for", "for what", "what the payment paragraph is for", "what's the payment paragraph for", "what is the payment paragraph for", "payment paragraph for what", "what paragraph", "paragraph for what", "what's it", "what is it", "what's that for", "what's that", "what is that", "what is this payment", "what's this payment", "what is this payment for", "what's this payment for"]
+        script14_keywords = ["what is it for", "what's it for", "what for", "what payment", "what's the payment for", "what is the payment for", "payment for what", "what's this for", "what is this for", "for what", "what the payment paragraph is for", "what's the payment paragraph for", "what is the payment paragraph for", "payment paragraph for what", "what paragraph", "paragraph for what", "what's it", "what is it", "what's that for", "what's that", "what is that", "what is this payment", "what's this payment", "what is this payment for", "what's this payment for", "why do you need to make this payment", "why do you need to make the payment", "why do you need this payment", "why do you need to pay this", "why do you need to pay it", "why do you need to pay it for"]
         latest_lower = latest_msg.lower() if latest_msg else ""
         contains_what_for_keyword = any(keyword in latest_lower for keyword in script14_keywords)
+
+        contains_why_need_payment = (
+            "why" in latest_lower and
+            ("need" in latest_lower or "have to" in latest_lower) and
+            ("payment" in latest_lower or "pay" in latest_lower)
+        )
         
         # Also check if message is a question containing "what" and payment-related words
         is_what_question = "?" in latest_msg and ("what" in latest_lower) and ("payment" in latest_lower or "it" in latest_lower or "this" in latest_lower or "that" in latest_lower)
         
         # If payment request was sent and they ask what it's for (ANY variation), ALWAYS respond with macbook message
         # This has HIGHEST PRIORITY - before payment details
-        if payment_request_was_sent and (contains_what_for_keyword or is_what_question):
+        if payment_flow_detected and not asks_why_so_much(latest_lower) and (contains_what_for_keyword or contains_why_need_payment or is_what_question):
             macbook_message = "Its for a macbook I got I just have to pay it back today as my friend has bills to pay today"
             
             # Detect kisses and append if present
@@ -1304,6 +2020,34 @@ def get_response():
                 "timestamp": datetime.now().isoformat()
             }), 200
         
+        # Check for Script 19: Where/what/which account to pay into
+        if payment_flow_detected and payment_details and asks_where_to_pay(latest_lower):
+            payment_details_message = payment_details
+            kisses = None
+            if latest_msg:
+                end_patterns = [
+                    r'([xX]{2,})\s*$',
+                    r'\s+([xX]{2,})\s*$',
+                    r'([xX]{2,})[\.\?\!]*\s*$',
+                ]
+                for pattern in end_patterns:
+                    end_match = re.search(pattern, latest_msg, re.MULTILINE)
+                    if end_match:
+                        kisses = end_match.group(1)
+                        break
+                if not kisses:
+                    any_match = re.search(r'([xX]{2,})', latest_msg)
+                    if any_match:
+                        kisses = any_match.group(1)
+            if kisses:
+                payment_details_message = payment_details_message.rstrip() + " " + kisses
+            payment_details_message = payment_details_message.rstrip()
+            while payment_details_message.endswith('.'):
+                payment_details_message = payment_details_message[:-1].rstrip()
+            payment_details_sent[contact_key] = datetime.now()
+            mark_favour_request(contact_key)
+            return send_immediate_response(payment_details_message, "Script 19: They asked where/what to pay into, sending payment details", "script19", use_variant=False)
+        
         # Check for Script 13: Payment details after payment request
         # ONLY send payment details if they EXPLICITLY ask for them OR agree to make the payment
         # payment_request_was_sent already set above (checks entire conversation, not just previous message)
@@ -1321,7 +2065,7 @@ def get_response():
         # Only send payment details if they EXPLICITLY ask for them OR explicitly agree to make the payment
         # AND payment_details is provided
         # This triggers if payment request was sent at ANY point before, not just immediately before
-        if payment_request_was_sent and (is_asking_for_details or is_agreeing_to_pay) and payment_details:
+        if payment_flow_detected and (is_asking_for_details or is_agreeing_to_pay) and payment_details:
             payment_details_message = payment_details
             
             # Detect kisses and append if present
@@ -1349,6 +2093,7 @@ def get_response():
             payment_details_message = payment_details_message.rstrip()
             while payment_details_message.endswith('.'):
                 payment_details_message = payment_details_message[:-1].rstrip()
+            payment_details_sent[contact_key] = datetime.now()
             
             return jsonify({
                 "action": "SEND",
@@ -1361,8 +2106,8 @@ def get_response():
         script15_keywords = ["will you pay", "will you pay me back", "will you pay back", "pay me back tomorrow", "pay back tomorrow", "you will pay", "you will pay me back", "you will pay back", "promise you will pay", "promise you will pay me back", "promise you will pay back", "but promise you will pay me back tomorrow", "but promise you will pay me back", "promise you will pay me back tomorrow", "you'll pay", "you'll pay me back", "you'll pay back", "are you going to pay", "are you going to pay me back", "are you going to pay back", "going to pay", "going to pay me back", "going to pay back", "getting my money back", "get my money back", "getting money back", "get money back", "promise me i will get my money back", "promise me i will get my money back tomorrow", "promise me i will get money back", "promise me i will get money back tomorrow", "i will get my money back", "i will get money back", "will i get my money back", "will i get money back", "will i get my money back tomorrow", "will i get money back tomorrow"]
         contains_payback_question = any(keyword in latest_lower for keyword in script15_keywords)
         
-        if payment_request_was_sent and contains_payback_question:
-            payback_message = "Its okay please do not worry I will pay you back first thing tomorrow morning"
+        if payment_flow_detected and contains_payback_question:
+            payback_message = "please do not worry i will definitely pay you back first thing in the morning"
             
             # Detect kisses and append if present
             kisses = None
@@ -1396,12 +2141,41 @@ def get_response():
                 "reasoning": "Script 15: Previous message was payment request (Script 12) and current message asks if will pay back tomorrow",
                 "timestamp": datetime.now().isoformat()
             }), 200
+
+        # Check for Script 21: Why can't they pay into your account
+        if payment_flow_detected and asks_why_not_your_account(latest_lower):
+            account_explanation_message = "is becasue i cannot make online payment until my new number is added, so could you please make the payemnt for me on behalf please and i promise i will pay you back fritst thing in the morning"
+            kisses = None
+            if latest_msg:
+                end_patterns = [
+                    r'([xX]{2,})\s*$',
+                    r'\s+([xX]{2,})\s*$',
+                    r'([xX]{2,})[\.\?\!]*\s*$',
+                ]
+                for pattern in end_patterns:
+                    end_match = re.search(pattern, latest_msg, re.MULTILINE)
+                    if end_match:
+                        kisses = end_match.group(1)
+                        break
+                if not kisses:
+                    any_match = re.search(r'([xX]{2,})', latest_msg)
+                    if any_match:
+                        kisses = any_match.group(1)
+            if kisses:
+                account_explanation_message = account_explanation_message.rstrip() + " " + kisses
+            account_explanation_message = account_explanation_message.rstrip()
+            while account_explanation_message.endswith('.'):
+                account_explanation_message = account_explanation_message[:-1].rstrip()
+            return send_immediate_response(account_explanation_message, "Script 21: They asked why they can't pay it into your account", "script21", use_variant=False)
         
         # Check for Script 16: Who is this person (after payment details sent)
         # CRITICAL: Scan the ENTIRE conversation to verify payment details (Script 13) were actually sent
         # Payment details are sent when Script 13 is triggered - look for messages that contain payment details
         payment_details_was_sent = False
-        if parsed_turns and payment_details:
+        pd_timestamp = payment_details_sent.get(contact_key)
+        if pd_timestamp and datetime.now() - pd_timestamp <= timedelta(hours=24):
+            payment_details_was_sent = True
+        elif parsed_turns and payment_details:
             payment_details_lower = payment_details.strip().lower()
             # Look through entire conversation history to find if payment details were sent
             for turn in parsed_turns:
@@ -1426,47 +2200,25 @@ def get_response():
         script16_keywords = ["who is this", "who is this person", "who is this guy", "who is this man", "who is this woman", "who is this lady", "who is he", "who is she", "who are they", "who is that", "who is that person", "who is that guy", "who is that man", "who is that woman", "who is that lady", "who's this", "who's this person", "who's this guy", "who's this man", "who's this woman", "who's this lady", "who's he", "who's she", "who's that", "who's that person", "who's that guy", "who's that man", "who's that woman", "who's that lady", "what is this person", "what is this guy", "what is this man", "what is this woman", "what is this lady"]
         contains_who_person_question = any(keyword in latest_lower for keyword in script16_keywords)
         
-        if payment_request_was_sent and payment_details_was_sent and contains_who_person_question:
-            friend_message = "Just a friend of mine do not worry it is safe to pay I have spoken to him and he is aware of the payment"
-            
-            # Detect kisses and append if present
-            kisses = None
-            if latest_msg:
-                end_patterns = [
-                    r'([xX]{2,})\s*$',
-                    r'\s+([xX]{2,})\s*$',
-                    r'([xX]{2,})[\.\?\!]*\s*$',
-                ]
-                for pattern in end_patterns:
-                    end_match = re.search(pattern, latest_msg, re.MULTILINE)
-                    if end_match:
-                        kisses = end_match.group(1)
-                        break
-                if not kisses:
-                    any_match = re.search(r'([xX]{2,})', latest_msg)
-                    if any_match:
-                        kisses = any_match.group(1)
-            
-            if kisses:
-                friend_message = friend_message.rstrip() + " " + kisses
-            
-            # Remove trailing periods
-            friend_message = friend_message.rstrip()
-            while friend_message.endswith('.'):
-                friend_message = friend_message[:-1].rstrip()
-            
-            return jsonify({
-                "action": "SEND",
-                "response": friend_message,
-                "reasoning": "Script 16: Payment details (Script 13) were sent and current message asks who is this person",
-                "timestamp": datetime.now().isoformat()
-            }), 200
+        payment_request_flag = payment_request_sent.get(contact_key)
+        if isinstance(payment_request_flag, datetime) and (datetime.now() - payment_request_flag) > timedelta(hours=24):
+            payment_request_flag = None
+        if payment_request_flag and payment_request_was_sent and contains_who_person_question:
+            pass  # Script 16 disabled; handled downstream with Script 11 fallback
         
         # Check for Script 17: Why am i paying it to this person
-        script17_keywords = ["why am i paying", "why am i paying it to", "why am i paying this to", "why am i paying that to", "why am i paying to", "why do i pay", "why do i pay it to", "why do i pay this to", "why do i pay that to", "why do i pay to", "why should i pay", "why should i pay it to", "why should i pay this to", "why should i pay that to", "why should i pay to", "why pay", "why pay it to", "why pay this to", "why pay that to", "why pay to", "why to this person", "why to this guy", "why to this man", "why to this woman", "why to this lady", "why to him", "why to her", "why to them"]
+        script17_keywords = [
+            "why am i paying", "why am i paying it to", "why am i paying this to", "why am i paying that to", "why am i paying to",
+            "why do i pay", "why do i pay it to", "why do i pay this to", "why do i pay that to", "why do i pay to",
+            "why should i pay", "why should i pay it to", "why should i pay this to", "why should i pay that to", "why should i pay to",
+            "why pay", "why pay it to", "why pay this to", "why pay that to", "why pay to",
+            "why to this person", "why to this guy", "why to this man", "why to this woman", "why to this lady", "why to him", "why to her", "why to them",
+            "why send money", "why am i sending money", "why send it", "why am i sending this", "why am i giving this money", "why am i paying him", "why am i paying her",
+            "why are you asking me to pay", "why you asking me to pay", "why do you want me to pay"
+        ]
         contains_why_pay_person_question = any(keyword in latest_lower for keyword in script17_keywords)
         
-        if payment_request_was_sent and payment_details_was_sent and contains_why_pay_person_question:
+        if payment_request_was_sent and payment_details_was_sent and payment_request_flag and contains_why_pay_person_question:
             why_pay_message = "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment"
             
             # Detect kisses and append if present
@@ -1508,6 +2260,14 @@ def get_response():
         if user_name:
             name_context = f"\n\nCRITICAL: The user's name appears to be '{user_name}' (extracted from conversation). This is for CONTEXT ONLY - NEVER use the name in your response. NEVER say 'I'm {user_name}' or 'This is {user_name}' or include the name in any way. Responses should be natural and conversational WITHOUT using names.\n"
         
+        payment_request_present = payment_request_flag is not None
+        payment_flow_active = favour_request_sent or payment_request_present or payment_details_was_sent
+        context_flags_section = f"""CONTEXT FLAGS:
+FAVOUR_REQUEST_IN_CONVERSATION: {"YES" if favour_request_sent else "NO"}
+PAYMENT_REQUEST_IN_CONVERSATION: {"YES" if payment_request_present else "NO"}
+PAYMENT_DETAILS_ALREADY_SENT: {"YES" if payment_details_was_sent else "NO"}
+PAYMENT_FLOW_ACTIVE: {"YES" if payment_flow_active else "NO"}"""
+        
         user_message = f"""
 FULL CONVERSATION (READ ALL MESSAGES FOR CONTEXT):
 {conversation_text}
@@ -1519,6 +2279,7 @@ LATEST MESSAGE FROM THEM (READ THE ENTIRE MESSAGE WORD-BY-WORD):
 
 LATEST (normalized, lowercase, punctuation removed):
 {latest_norm}
+{context_flags_section}
 {name_context}
 ---
 
@@ -1537,7 +2298,16 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
 """
         
         # Call AI (Claude first, then Groq fallback)
-        response_text = call_ai_with_fallback(SYSTEM_PROMPT, user_message, max_tokens=350)
+        try:
+            response_text = call_ai(SYSTEM_PROMPT, user_message, max_tokens=350)
+        except Exception as e:
+            print(f"ERROR: Claude API call failed: {e}")
+            return jsonify({
+                "action": "NO_SEND",
+                "response": "",
+                "reasoning": f"AI service unavailable: {e}",
+                "timestamp": datetime.now().isoformat()
+            }), 503
         
         # Parse Claude's response
         import json
@@ -1730,7 +2500,7 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
             has_placeholder = "[your name]" in decision_response or "[name]" in decision_response or "it's me" in response_lower
             is_not_exact_script1 = "Your eldest and favourite" not in decision_response
             
-            if is_script1 or (has_placeholder and is_not_exact_script1):
+            if (not payment_flow_detected) and (is_script1 or (has_placeholder and is_not_exact_script1)):
                 # Preserve kisses if present in Claude's response
                 kisses = None
                 if decision_response:
@@ -1757,20 +2527,21 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
                 print(f"FORCED SCRIPT 1: Replaced response with exact Script 1 text (original was: {decision.get('response', '')[:50]})")
         
         script_id = ""
+        decision_response_lower = decision_response.lower() if decision_response else ""
         if decision_action == "SEND" and decision_response:
             # Create unique key for this message/script combination
             # Normalize the response to identify which script it is
-            if "Your eldest and favourite" in decision_response:
+            if response_in_variant("Your eldest and favourite", decision_response):
                 script_id = "script1"
-            elif "Its permanent ill be using this number from now on" in decision_response:
+            elif response_in_variant("Its permanent ill be using this number from now on", decision_response):
                 script_id = "script2"
-            elif "Its my personal number" in decision_response:
+            elif response_in_variant("Its my personal number", decision_response):
                 script_id = "script2"
-            elif "Yes I'll be using this number from now on" in decision_response and "because" in decision_response:
+            elif response_in_variant("Yes I'll be using this number from now on", decision_response) and "because" in decision_response:
                 script_id = "script3"
-            elif "Yes I'll be using this number from now on" in decision_response:
+            elif response_in_variant("Yes I'll be using this number from now on", decision_response):
                 script_id = "script2"
-            elif "Yes ill be using this number from now on" in decision_response:
+            elif response_in_variant("Yes ill be using this number from now on", decision_response):
                 script_id = "script2"
             elif "Do not worry I will get it cancelled" in decision_response:
                 script_id = "script4"
@@ -1780,18 +2551,56 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
                 script_id = "script6"
             elif "I got the Iphone 16" in decision_response:
                 script_id = "script7"
-            elif "Could you do me a favour please" in decision_response:
+            elif response_in_variant(FAVOUR_VARIANTS[0], decision_response) or "Could you do me a favour please" in decision_response:
                 script_id = "script9"
             elif "I need to make a payment today but can't for 24h" in decision_response and "£1,745" in decision_response:
                 script_id = "script12"
             elif "Its for a macbook i got i just need to pay it back if that's okay" in decision_response:
                 script_id = "script14"
+            elif response_in_variant("You can delete the old number as ill be using this one from now on", decision_response):
+                script_id = "script2"
+            elif response_in_variant("please do not worry i will definitely pay you back first thing in the morning", decision_response):
+                script_id = "script15"
+            elif decision_response_lower.startswith("i am soo sorry honestly"):
+                script_id = "script20"
+            elif response_in_variant("it is because i cannot make online payment until my new number is added, so could you please make the payment for me on behalf please and i promise i will pay you back first thing in the morning", decision_response):
+                script_id = "script21"
             elif payment_details:
                 # Script 13: Check if response matches payment details (may have kisses appended)
                 response_no_kisses = re.sub(r'\s+[xX]{2,}\s*$', '', decision_response.strip())
                 response_no_kisses = re.sub(r'[xX]{2,}\s*$', '', response_no_kisses)
                 if response_no_kisses.strip() == payment_details.strip():
                     script_id = "script13"
+
+            if script_id == "script9":
+                mark_favour_request(contact_key)
+
+            if (favour_request_sent or payment_request_flag) and script_id in {"script1", "script2", "script3", "script4", "script5"}:
+                print(f"DEBUG: Replacing {script_id} because payment flow already started")
+                fallback_response = generate_natural_fallback(latest_msg or "", "?" in (latest_msg or ""), False)
+                decision_action = "SEND"
+                decision_response = fallback_response
+                decision["response"] = decision_response
+                decision["reasoning"] = "Script 11: Payment flow active - natural response"
+                script_id = "script11"
+                response_normalized = re.sub(r'[^a-z0-9 ]+', '', decision_response.lower().strip())
+                response_normalized = re.sub(r'\s+', ' ', response_normalized).strip()
+                response_normalized_no_kisses = re.sub(r'\b[xX]{2,}\b', '', response_normalized).strip()
+                response_key = f"{device_id}:{contact_id}:response:{hashlib.sha1(response_normalized_no_kisses.encode('utf-8')).hexdigest()[:16]}"
+            elif payment_details_was_sent and script_id and script_id not in {"script11", "script14", "script15", "script17", "script18", "script8", "script20", "script21"}:
+                print(f"DEBUG: Replacing {script_id} because payment details were already sent")
+                fallback_response = generate_natural_fallback(latest_msg or "", "?" in (latest_msg or ""), False)
+                decision_action = "SEND"
+                decision_response = fallback_response
+                decision["response"] = decision_response
+                decision["reasoning"] = "Script 11: Payment details already sent - natural response"
+                script_id = "script11"
+                response_normalized = re.sub(r'[^a-z0-9 ]+', '', decision_response.lower().strip())
+                response_normalized = re.sub(r'\s+', ' ', response_normalized).strip()
+                response_normalized_no_kisses = re.sub(r'\b[xX]{2,}\b', '', response_normalized).strip()
+                response_key = f"{device_id}:{contact_id}:response:{hashlib.sha1(response_normalized_no_kisses.encode('utf-8')).hexdigest()[:16]}"
+            elif script_id == "script12":
+                payment_request_sent[contact_key] = datetime.now()
             else:
                 script_id = decision_response[:20]  # fallback to first 20 chars (Script 8, 10, or 11 AI-generated)
 
@@ -1832,19 +2641,30 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
                     script_id = "script6"
                 elif "I got the Iphone 16" in decision_response:
                     script_id = "script7"
-                elif "Could you do me a favour please" in decision_response:
+                elif response_in_variant(FAVOUR_VARIANTS[0], decision_response) or "Could you do me a favour please" in decision_response:
                     script_id = "script9"
                 elif "Its for a macbook i got i just need to pay it back if that's okay" in decision_response:
                     script_id = "script14"
                 else:
                     script_id = decision_response[:20]
 
-            latest_fingerprint_source = latest_norm or latest_msg.lower().strip() or "(none)"
+            if script_id == "script9":
+                mark_favour_request(contact_key)
+
+            if decision_action == "SEND" and script_id in {"script1", "script2", "script3", "script4", "script5"} and (favour_request_sent or payment_request_flag):
+                print(f"DEBUG: Re-blocking {script_id} because payment flow already started (post-recalc)")
+                decision_action = "NO_SEND"
+                decision_response = ""
+                decision["response"] = ""
+                decision["reasoning"] = f"{script_id.upper()} blocked after payment request flow started"
+                script_id = ""
+
+            latest_fingerprint_source = latest_norm or ((latest_msg or "").lower().strip()) or "(none)"
             latest_hash = hashlib.sha1(latest_fingerprint_source.encode("utf-8")).hexdigest()[:12]
             
             # Check for duplicate - CRITICAL: Only prevent if it's the EXACT same incoming message
             # Different incoming messages should always get responses, even if they trigger the same script
-            msg_key = f"{device_id}:{contact_id}:{script_id}:{latest_hash}:{turn_count}"
+            msg_key = f"{device_id}:{contact_id}:{script_id}:{latest_hash}"
             
             # CRITICAL: Check if we've already responded to THIS EXACT incoming message
             # If msg_key exists, it means we already processed this exact message
@@ -1927,7 +2747,7 @@ Analyze the conversation and provide an ALTERNATIVE response.
 """
                         
                         try:
-                            alt_response_text = call_ai_with_fallback(SYSTEM_PROMPT, alt_user_message, max_tokens=350)
+                            alt_response_text = call_ai(SYSTEM_PROMPT, alt_user_message, max_tokens=350)
                             
                             # Parse alternative response
                             if "{" in alt_response_text and "}" in alt_response_text:
@@ -1999,6 +2819,18 @@ Analyze the conversation and provide an ALTERNATIVE response.
 
         # Process response: detect kisses and remove trailing periods
         if decision_action == "SEND" and decision_response:
+            # For Script 2, ensure we don't reveal a name unless they explicitly used it
+            if script_id == "script2":
+                name_pattern = re.compile(r"\b(?:yes\s+)?(?:it['']s|it\s+is)\s+([A-Z][a-z]+)", re.IGNORECASE)
+                match = name_pattern.search(decision_response)
+                if match:
+                    mentioned_name = match.group(1)
+                    inbound_lower = (latest_inbound or "").lower()
+                    if mentioned_name.lower() not in inbound_lower:
+                        print(f"DEBUG: Removing name '{mentioned_name}' from Script 2 response (not mentioned in incoming message)")
+                        decision_response = "Yes I'll be using this number from now on"
+                        decision["response"] = decision_response
+
             # SPECIAL CASE: If Script 3 response and they mention paying for old contract, append cancellation message
             if script_id == "script3" and latest_inbound:
                 latest_lower = latest_inbound.lower()
