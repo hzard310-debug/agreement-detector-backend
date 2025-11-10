@@ -1362,6 +1362,7 @@ def get_response():
         previous_was_favour = favour_request_sent or contains_favour_request_phrase(prev_you_text)
         previous_was_save = "save my new number" in prev_you_lower
         previous_was_payment_request = "i need to make a payment today" in prev_you_lower
+        script9_already_sent = favour_request_sent or has_favour_request_been_sent(contact_key)
 
         if not (favour_request_sent or payment_request_flag):
             chosen_name = choose_name_from_or_question(latest_msg)
