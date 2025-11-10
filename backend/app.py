@@ -1396,6 +1396,15 @@ def get_response():
             extra_request_sent.setdefault(contact_key, False)
             return send_immediate_response("Thank you so much honestly, could you please send over your bank details so I can pay you back first thing in the morning and also if possible can you please send over a confirmation of the payment so I can send it over.", "Special case: payment confirmation", "special_payment_confirmed")
 
+        if payment_details_was_sent and payment_confirmed(latest_lower) and not script_already_sent(contact_key, "script22"):
+            record_script_sent(contact_key, "script22")
+            return send_immediate_response(
+                "Can you please send me your details so I can send it back first thing tomorrow",
+                "Special case: payment done acknowledgement",
+                "script22",
+                use_variant=False
+            )
+
         if (not payment_details_was_sent and contact_key in payment_confirmed_contacts and
                 datetime.now() - payment_confirmed_contacts[contact_key] <= timedelta(hours=12) and
                 not extra_request_sent.get(contact_key, False) and
