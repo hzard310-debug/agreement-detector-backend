@@ -3206,6 +3206,7 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
                 response_normalized_no_kisses = re.sub(r'\b[xX]{2,}\b', '', response_normalized).strip()
                 response_key = f"{device_id}:{contact_id}:response:{hashlib.sha1(response_normalized_no_kisses.encode('utf-8')).hexdigest()[:16]}"
             
+            allow_send = True
             # FIRST: Check if we've already processed this EXACT incoming message (by msg_key)
             # This is the most important check - prevent processing the same message twice
             prev_msg_key_ts = sent_tracker.get(msg_key)
