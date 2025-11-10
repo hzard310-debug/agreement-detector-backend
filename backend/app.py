@@ -1440,7 +1440,7 @@ def get_response():
             return send_immediate_response("Yes please, I would really appreciate it thank you.", "Special case: same account confirmation", "special_same_account_confirmation")
 
         if previous_was_payment_request and no_money_available(latest_lower):
-            return send_immediate_response("Is there anyone you can ask? It's urgent, I really don't want to get hit with late fees and I promise I'll get it back to you first thing in the morning.", "Special case: no money available", "special_no_money")
+            return send_immediate_response("Is there anyone you can ask as it is really urgent, sorry for the trouble", "Special case: no money available", "special_no_money")
 
         if asks_how_are_you(latest_lower):
             return send_immediate_response("I'm good thanks, how are you?", "Special case: how are you question", "script8")
