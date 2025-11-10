@@ -56,13 +56,13 @@ class MainActivity : AppCompatActivity() {
             tab.text = when (position) {
                 0 -> "AI Control"
                 1 -> "Payment Details"
-                else -> ""
+                else -> "Telegram"
             }
         }.attach()
 
         requestPermissionsIfNeeded()
         requestBatteryOptimizationExemption()
-        
+
         // Start foreground service to keep app alive when screen is locked
         SmsProcessingService.start(this)
     }

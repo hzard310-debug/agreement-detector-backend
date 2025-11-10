@@ -7,8 +7,9 @@ import android.os.PowerManager
 import android.provider.Telephony
 import android.telephony.SmsMessage
 import android.util.Log
-import okhttp3.MediaType.Companion.toMediaType
 import java.security.MessageDigest
+import java.util.Locale
+import okhttp3.MediaType.Companion.toMediaType
 
 class SmsReceiver : BroadcastReceiver() {
     private fun hashMessage(address: String, message: String): String {
@@ -75,6 +76,20 @@ class SmsReceiver : BroadcastReceiver() {
                 android.util.Log.e("SmsReceiver", "Toast error", e)
             }
 
+            // Mark message as queued so the scanner doesn't enqueue it again before processing finishes
+            try {
+                val msgHash = hashMessage(sender, body)
+                val prefs = context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                val queued = prefs.getStringSet("scan_queued_messages", null)?.toMutableSet() ?: mutableSetOf()
+                if (!queued.contains(msgHash)) {
+                    queued.add(msgHash)
+                    prefs.edit().putStringSet("scan_queued_messages", queued).apply()
+                    android.util.Log.d("SmsReceiver", "Marked message as queued to prevent duplicate scan: $msgHash")
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("SmsReceiver", "Unable to mark message as queued: ${e.message}")
+            }
+
             // REMOVED: AI enabled check - always process messages automatically
             android.util.Log.i("SmsReceiver", "[OK] Processing message automatically")
             
@@ -136,6 +151,7 @@ class SmsReceiver : BroadcastReceiver() {
                         }
                         
                         // Get payment details from SharedPreferences
+                        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
                         val paymentDetails = prefs.getString("payment_details", "")?.trim() ?: ""
                         
                         val requestBody = org.json.JSONObject().apply {
@@ -397,17 +413,237 @@ class SmsReceiver : BroadcastReceiver() {
                                                     Log.d("SmsReceiver", "Payment paragraph question detected - queued macbook response: $macbookResponse")
                                                     return@use
                                                 }
+
+                                                // Old number / delete old number questions
+                                                val oldNumberKeywords = listOf(
+                                                    "old number",
+                                                    "previous number",
+                                                    "old mobile",
+                                                    "old phone",
+                                                    "old sim",
+                                                    "your old"
+                                                )
+                                                val asksAboutOldNumber = oldNumberKeywords.any { lowerBody.contains(it) } ||
+                                                        (lowerBody.contains("delete") && lowerBody.contains("old") && (lowerBody.contains("number") || lowerBody.contains("num")))
+                                                if (asksAboutOldNumber) {
+                                                    val response = "Yes ill be using this number from now on, you can delete the old one."
+                                                    val incomingMessageHash = hashMessage(sender, messageBody)
+                                                    AutoSendQueue.enqueue(context, sender, response, AutoSendQueue.Source.AI, incomingMessageHash)
+                                                    Log.d("SmsReceiver", "Old number question detected - queued response: $response")
+                                                    return@use
+                                                }
                                                 
+                                                fun selectNameFromOrQuestion(text: String): String? {
+                                                    val lower = text.lowercase()
+                                                    if (
+                                                        !lower.contains("is this") &&
+                                                        !lower.contains("is it") &&
+                                                        !lower.contains("is that") &&
+                                                        !lower.contains("are you")
+                                                    ) return null
+                                                    val regex = Regex("([A-Za-z][A-Za-z]+)\\s+or\\s+([A-Za-z][A-Za-z]+)")
+                                                    val match = regex.find(text)
+                                                    val femaleNames = setOf(
+                                                        "amy", "anna", "beth", "charlotte", "chloe", "danielle", "emily", "emma",
+                                                        "georgia", "grace", "hannah", "isla", "jessica", "karen", "kate", "katie",
+                                                        "lauren", "lily", "lucy", "megan", "nicole", "olivia", "rachel", "sarah",
+                                                        "sophie", "victoria", "zoe"
+                                                    )
+                                                    if (match != null) {
+                                                        fun prettyName(raw: String): String {
+                                                            val cleaned = raw.trim().trimEnd('.', ',', '!', '?')
+                                                            return if (cleaned.isNotEmpty()) {
+                                                                cleaned.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                                                            } else cleaned
+                                                        }
+                                                        val first = prettyName(match.groupValues[1])
+                                                        val second = prettyName(match.groupValues[2])
+                                                        val options = listOf(first, second).filter { it.isNotEmpty() }
+                                                        if (options.size == 2) {
+                                                            val feminine = options.firstOrNull { femaleNames.contains(it.lowercase()) }
+                                                            return feminine ?: options.first()
+                                                        }
+                                                    }
+                                                    return null
+                                                }
+                                                
+                                                shouldUseFallback = false // Defer special-case handling to backend
+
                                                 if (shouldUseFallback) {
+                                                    val nameChoice = selectNameFromOrQuestion(messageBody)
+                                                    fun detectSingleWordName(original: String): Boolean {
+                                                        val cleaned = original.replace(Regex("[^A-Za-z]"), " ").trim()
+                                                        val words = cleaned.split(Regex("\\s+")).filter { it.isNotEmpty() }
+                                                        return words.size == 1 && words[0].length >= 2 && words[0][0].isLetter()
+                                                    }
+                                                    fun containsPoliceKeywords(lower: String): Boolean {
+                                                        val keywords = listOf("police", "fraud squad", "cyber crime", "cybercrime", "scam unit", "authorities", "law enforcement")
+                                                        return keywords.any { lower.contains(it) }
+                                                    }
+                                                    fun isWhichChildMessage(lower: String): Boolean {
+                                                        return lower.contains("which child is this") ||
+                                                               (lower.contains("which child") && lower.contains("number")) ||
+                                                               lower.contains("which kid is this") ||
+                                                               lower.contains("child of mine") ||
+                                                               lower.contains("children's number") ||
+                                                               lower.contains("childrens number")
+                                                    }
+                                                    fun needsHelpDecline(lower: String): Boolean {
+                                                        return (lower.contains("need any help") || lower.contains("need help with it") || lower.contains("help with it") ||
+                                                                lower.contains("need help with anything") || lower.contains("want any help")) &&
+                                                                (lower.contains("kit") || lower.contains("device") || lower.contains("phone") || lower.contains("number") || lower.contains("new"))
+                                                    }
+                                                    fun isReactionToSaveNumber(lower: String): Boolean {
+                                                        return (lower.contains("liked") || lower.contains("reacted") || lower.contains("loved") || lower.contains("thumbs up")) &&
+                                                               lower.contains("dad save my new number")
+                                                    }
+                                                    fun isMissedCallAlert(lower: String): Boolean {
+                                                        return lower.contains("missed a call from me") &&
+                                                               (lower.contains("call alert") || lower.contains("dial 901") || lower.contains("o2"))
+                                                    }
+                                                    fun mentionsNoChildren(lower: String): Boolean {
+                                                        return lower.contains("no sons") ||
+                                                               lower.contains("no daughters") ||
+                                                               lower.contains("no children") ||
+                                                               lower.contains("no kids") ||
+                                                               lower.contains("not anyone's dad") ||
+                                                               lower.contains("no one's dad")
+                                                    }
+                                                    fun mentionsScam(lower: String): Boolean {
+                                                        return lower.contains("goodbye scam") ||
+                                                               (lower.contains("scam") && (lower.contains("goodbye") || lower.contains("bye") || lower.contains("lol")))
+                                                    }
+                                                    fun paymentRefusal(lower: String): Boolean {
+                                                        return lower.contains("lol no") || lower.contains("nah no") || lower.contains("no chance") || lower.contains("not paying")
+                                                    }
+                                                    fun wrongNumberDad(lower: String): Boolean {
+                                                        return lower.contains("wrong number pal") ||
+                                                               lower.contains("wrong number mate") ||
+                                                               (lower.contains("wrong number") && lower.contains("dad"))
+                                                    }
+                                                    fun asksBankDetailsButLow(lower: String): Boolean {
+                                                        return (lower.contains("what are your bank details") || lower.contains("bank details") || lower.contains("account details")) &&
+                                                               (lower.contains("dont have that much") || lower.contains("don't have that much") || lower.contains("not that much") || lower.contains("don't have much"))
+                                                    }
+                                                    fun acknowledgesSaveAnythingElse(lower: String): Boolean {
+                                                        return (lower.contains("i'll save it") || lower.contains("ill save it") || lower.contains("saved it")) &&
+                                                               (lower.contains("anything else you need") || lower.contains("need anything else"))
+                                                    }
+                                                    fun acknowledgesNoWorries(lower: String): Boolean {
+                                                        return lower.contains("ok no worries") ||
+                                                               lower.contains("okay no worries") ||
+                                                               lower.contains("no worries") ||
+                                                               lower.contains("ok thats fine") ||
+                                                               lower.contains("okay thats fine") ||
+                                                               lower.contains("all good") ||
+                                                               lower.contains("fine no problem")
+                                                    }
+                                                    fun paymentConfirmed(lower: String): Boolean {
+                                                        return (lower.contains("payment sent") || lower.contains("money sent") || lower.contains("paid") || lower.contains("transfer done") || lower.contains("sent it")) &&
+                                                               (lower.contains("payment") || lower.contains("transfer") || lower.contains("bank") || lower.contains("money"))
+                                                    }
+                                                    fun noMoneyAvailable(lower: String): Boolean {
+                                                        return lower.contains("don't have any money") ||
+                                                               lower.contains("dont have any money") ||
+                                                               (lower.contains("have £") && lower.contains("left")) ||
+                                                               lower.contains("have no money") ||
+                                                               (lower.contains("only have") && lower.contains("£"))
+                                                    }
+                                                    fun asksYourName(lower: String): Boolean {
+                                                        return lower.contains("your name") && lower.contains("?")
+                                                    }
+                                                    fun isQuestionMarksOnly(text: String): Boolean {
+                                                        val trimmed = text.trim()
+                                                        return trimmed.isNotEmpty() && trimmed.all { it == '?' }
+                                                    }
+                                                    fun mentionsRefusalToSave(lower: String): Boolean {
+                                                        return lower.contains("i don't want to") && lower.contains("save")
+                                                    }
+                                                    fun asksWhichTwin(lower: String): Boolean {
+                                                        return lower.contains("which twin are you") || lower.contains("which twin")
+                                                    }
+                                                    fun asksNeedMoneyAgain(lower: String): Boolean {
+                                                        return lower.contains("need money again")
+                                                    }
+                                                    fun asksHowDoIKnow(lower: String): Boolean {
+                                                        return lower.contains("how do i know") && lower.contains("really you")
+                                                    }
+                                                    fun asksHowOldNow(lower: String): Boolean {
+                                                        return lower.contains("how old are you now") || (lower.contains("how old are you") && lower.contains("now"))
+                                                    }
+                                                    fun asksWhatsMyNameThen(lower: String): Boolean {
+                                                        return lower.contains("what's my name then") || lower.contains("whats my name then") || lower.contains("what is my name then")
+                                                    }
+                                                    fun asksPickUp(lower: String): Boolean {
+                                                        return (lower.contains("pick me up") || lower.contains("pick us up")) && lower.contains("after work")
+                                                    }
+                                                    fun asksWhereHaveYouBeen(lower: String): Boolean {
+                                                        return lower.contains("where have you been") || lower.contains("where've you been")
+                                                    }
+                                                    fun asksFoodToday(lower: String): Boolean {
+                                                        return lower.contains("what have you had to eat") || lower.contains("what did you eat today") || lower.contains("what've you eaten")
+                                                    }
+                                                    fun asksCarProblemAfterFavour(lower: String): Boolean {
+                                                        return (lower.contains("car problem") || lower.contains("car problems") || lower.contains("car issue") || lower.contains("car again")) ||
+                                                               lower.contains("what's wrong") || lower.contains("whats wrong") || lower.contains("what happened")
+                                                    }
+                                                    fun mentionsStrangeParentScenario(lower: String): Boolean {
+                                                        return (lower.contains("spare undies") || (lower.contains("mum") && lower.contains("says hi"))) && lower.contains("son")
+                                                    }
+                                                    fun pickFavourMessage(): String {
+                                                        val variants = listOf(
+                                                            "Could you do me a favour please?",
+                                                            "Do you think you could do me a small favour?",
+                                                            "Could you do me a quick favour when you get a sec?",
+                                                            "Any chance you could do me a little favour?"
+                                                        )
+                                                        val idx = (System.currentTimeMillis() / 1000L % variants.size).toInt()
+                                                        return variants[idx]
+                                                    }
+                                                    
+                                                    if (containsPoliceKeywords(lowerBody) ||
+                                                        mentionsNoChildren(lowerBody) ||
+                                                        mentionsScam(lowerBody) ||
+                                                        paymentRefusal(lowerBody) ||
+                                                        wrongNumberDad(lowerBody) ||
+                                                        isQuestionMarksOnly(messageBody) ||
+                                                        mentionsRefusalToSave(lowerBody) ||
+                                                        asksWhichTwin(lowerBody) ||
+                                                        asksNeedMoneyAgain(lowerBody) ||
+                                                        asksHowDoIKnow(lowerBody) ||
+                                                        asksHowOldNow(lowerBody) ||
+                                                        asksWhatsMyNameThen(lowerBody) ||
+                                                        mentionsStrangeParentScenario(lowerBody)) {
+                                                        Log.d("SmsReceiver", "Detected message to ignore based on safety rules")
+                                                        return@use
+                                                    }
+                                                    
                                                     Log.d("SmsReceiver", "Generating natural AI response to question/statement")
                                                     
-                                                    // Generate natural, varied responses based on the message
-                                                    // IMPORTANT: Check most specific patterns first, then generic patterns, then else
                                                     val fallbackResponse = when {
-                                                        // PAYMENT/PROMISE MESSAGES - respond appropriately (check FIRST - highest priority)
-                                                        (lowerBody.contains("promise") || lowerBody.contains("will pay") || lowerBody.contains("pay back") || 
-                                                         lowerBody.contains("pay you back") || lowerBody.contains("pay me back")) && 
-                                                        (lowerBody.contains("tomorrow") || lowerBody.contains("will") || lowerBody.contains("promise")) -> {
+                                                        isWhichChildMessage(lowerBody) ->
+                                                            "it is your eldest and favourite, i will be using this number from now on. Everything's all good though, how are you getting on?"
+                                                        asksYourName(lowerBody) ->
+                                                            "Your eldest and favourite"
+                                                        isReactionToSaveNumber(lowerBody) ->
+                                                            pickFavourMessage()
+                                                        acknowledgesSaveAnythingElse(lowerBody) ->
+                                                            pickFavourMessage()
+                                                        acknowledgesNoWorries(lowerBody) ->
+                                                            pickFavourMessage()
+                                                        asksPickUp(lowerBody) ->
+                                                            "I'm not sure yet, I might be tied up. If anything changes I'll let you know."
+                                                        asksWhereHaveYouBeen(lowerBody) ->
+                                                            "Sorry, I've just been busy lately."
+                                                        asksFoodToday(lowerBody) ->
+                                                            "I just grabbed a quick sandwich earlier, nothing too exciting. What about you?"
+                                                        asksCarProblemAfterFavour(lowerBody) ->
+                                                            "No it's not, I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,785 if that's okay?"
+                                                        detectSingleWordName(messageBody) ->
+                                                            "Yes ill be using this number from now on"
+                                                        (lowerBody.contains("promise") || lowerBody.contains("will pay") || lowerBody.contains("pay back") ||
+                                                         lowerBody.contains("pay you back") || lowerBody.contains("pay me back")) &&
+                                                         (lowerBody.contains("tomorrow") || lowerBody.contains("will") || lowerBody.contains("promise")) -> {
                                                             if (lowerBody.contains("not a problem") || lowerBody.contains("no problem") || lowerBody.contains("that's fine") || lowerBody.contains("thats fine")) {
                                                                 "Yes i will i promise"
                                                             } else if (lowerBody.contains("promise")) {
@@ -416,10 +652,25 @@ class SmsReceiver : BroadcastReceiver() {
                                                                 "Yes i will i promise"
                                                             }
                                                         }
-                                                        lowerBody.contains("pay back") || lowerBody.contains("pay you back") || lowerBody.contains("pay me back") -> 
+                                                        lowerBody.contains("pay back") || lowerBody.contains("pay you back") || lowerBody.contains("pay me back") ->
                                                             "Yes i will i promise"
-                                                        
-                                                        // SERIOUS/URGENT MESSAGES - respond with care and concern
+                                                        nameChoice != null ->
+                                                            "Its $nameChoice"
+                                                        needsHelpDecline(lowerBody) ->
+                                                            "Thanks, I'm all sorted with it now but really appreciate you offering."
+                                                        lowerBody.contains("everything ok") || lowerBody.contains("everything okay") ||
+                                                        lowerBody.contains("everything alright") || lowerBody.contains("everything all right") ||
+                                                        lowerBody.contains("everything good") || lowerBody.contains("all ok") ||
+                                                        lowerBody.contains("all okay") || lowerBody.contains("all right") ->
+                                                            "Yeah everything's okay, how about you?"
+                                                        asksBankDetailsButLow(lowerBody) ->
+                                                            "Payment details are okay, would you be able to help with half of the payment?"
+                                                        paymentConfirmed(lowerBody) ->
+                                                            "Thank you so much honestly, could you please send over your bank details so I can pay you back first thing in the morning and also if possible can you please send over a confirmation of the payment so I can send it over."
+                                                        noMoneyAvailable(lowerBody) ->
+                                                            "Is there anyone you can ask? It's urgent, I really don't want to get hit with late fees and I promise I'll get it back to you first thing in the morning."
+                                                        isMissedCallAlert(lowerBody) ->
+                                                            "I can't call right now, could you drop me a message instead?"
                                                         lowerBody.contains("crashed") || lowerBody.contains("crash") || lowerBody.contains("accident") -> {
                                                             if (lowerBody.contains("car")) {
                                                                 "Oh no, is everyone okay? Let me know if you need anything"
@@ -427,93 +678,75 @@ class SmsReceiver : BroadcastReceiver() {
                                                                 "Oh no, are you okay? Let me know if you need anything"
                                                             }
                                                         }
-                                                        lowerBody.contains("hospital") -> 
+                                                        lowerBody.contains("hospital") ->
                                                             "Hope everything is okay, let me know if you need anything"
-                                                        lowerBody.contains("can't speak") || lowerBody.contains("cant speak") || 
-                                                        lowerBody.contains("can't talk") || lowerBody.contains("cant talk") -> 
+                                                        lowerBody.contains("can't speak") || lowerBody.contains("cant speak") ||
+                                                        lowerBody.contains("can't talk") || lowerBody.contains("cant talk") ->
                                                             "Okay, let me know when you can talk. Hope everything is okay"
-                                                        lowerBody.contains("hurt") || lowerBody.contains("injured") -> 
+                                                        lowerBody.contains("hurt") || lowerBody.contains("injured") ->
                                                             "Are you okay? Let me know if you need anything"
-                                                        lowerBody.contains("cancer") -> 
+                                                        lowerBody.contains("cancer") ->
                                                             "I'm so sorry to hear that. Let me know if you need anything or want to talk"
-                                                        lowerBody.contains("sick") || lowerBody.contains("ill") -> 
+                                                        lowerBody.contains("sick") || lowerBody.contains("ill") ->
                                                             "Hope you feel better soon, let me know if you need anything"
-                                                        lowerBody.contains("died") || lowerBody.contains("death") || lowerBody.contains("passed away") -> 
+                                                        lowerBody.contains("died") || lowerBody.contains("death") || lowerBody.contains("passed away") ->
                                                             "I'm so sorry. Let me know if you need anything or want to talk"
-                                                        lowerBody.contains("help") && (lowerBody.contains("need") || lowerBody.contains("urgent")) -> 
+                                                        lowerBody.contains("help") && (lowerBody.contains("need") || lowerBody.contains("urgent")) ->
                                                             "What do you need? I'm here to help"
-                                                        lowerBody.contains("emergency") || lowerBody.contains("urgent") -> 
+                                                        lowerBody.contains("emergency") || lowerBody.contains("urgent") ->
                                                             "What's wrong? Let me know if you need anything"
-                                                        
-                                                        // Shopping requests / lists - if message contains items (common shopping words)
-                                                        (lowerBody.contains("please") || lowerBody.contains("can you get") || lowerBody.contains("get me") || 
-                                                         lowerBody.contains("pick up") || lowerBody.contains("grab")) && 
-                                                        (lowerBody.contains("and") || lowerBody.split(" ").size >= 3) -> {
-                                                            // Extract items from message - look for common shopping items or just acknowledge
+                                                        (lowerBody.contains("please") || lowerBody.contains("can you get") || lowerBody.contains("get me") ||
+                                                         lowerBody.contains("pick up") || lowerBody.contains("grab")) &&
+                                                         (lowerBody.contains("and") || lowerBody.split(" ").size >= 3) ->
                                                             "Yes please"
-                                                        }
-                                                        
-                                                        // WhatsApp setup questions
-                                                        (lowerBody.contains("whatsapp") || lowerBody.contains("whats app")) && 
-                                                        (lowerBody.contains("set") || lowerBody.contains("setup") || lowerBody.contains("set up") || 
-                                                         lowerBody.contains("ready") || lowerBody.contains("done") || lowerBody.contains("working")) -> 
-                                                            "Not yet i still need to set it up"
-                                                        
-                                                        // Specific greetings/questions
-                                                        lowerBody.contains("what you been up to") || lowerBody.contains("what you been") || 
-                                                        (lowerBody.contains("okay") && lowerBody.contains("what")) -> 
+                                                        lowerBody.contains("what you been up to") || lowerBody.contains("what you been") ||
+                                                         (lowerBody.contains("okay") && lowerBody.contains("what")) ->
                                                             "Hey, not much just been busy. How about you?"
-                                                        lowerBody.contains("how are you") || lowerBody.contains("how you doing") -> 
+                                                        lowerBody.contains("how are you") || lowerBody.contains("how you doing") ->
                                                             "I'm good thanks, how are you?"
-                                                        lowerBody.contains("you ok") || lowerBody.contains("you alright") -> 
+                                                        lowerBody.contains("you ok") || lowerBody.contains("you alright") ->
                                                             "Yeah I'm fine thanks"
-                                                        lowerBody.contains("dinner") && lowerBody.contains("ready") -> 
+                                                        lowerBody.contains("dinner") && lowerBody.contains("ready") ->
                                                             "Thanks, be there soon"
-                                                        // Going to shops/store and asking if I need anything
-                                                        (lowerBody.contains("going to") || lowerBody.contains("going")) && 
-                                                        (lowerBody.contains("shop") || lowerBody.contains("store") || lowerBody.contains("supermarket")) &&
-                                                        (lowerBody.contains("need") || lowerBody.contains("want") || lowerBody.contains("anything")) -> 
+                                                        (lowerBody.contains("going to") || lowerBody.contains("going")) &&
+                                                         (lowerBody.contains("shop") || lowerBody.contains("store") || lowerBody.contains("supermarket")) &&
+                                                         (lowerBody.contains("need") || lowerBody.contains("want") || lowerBody.contains("anything")) ->
                                                             "No I'm good thanks"
-                                                        lowerBody.contains("going out") || lowerBody.contains("going to") -> 
+                                                        lowerBody.contains("going out") || lowerBody.contains("going to") ->
                                                             "Okay thanks"
-                                                        lowerBody.contains("at the") -> 
+                                                        lowerBody.contains("at the") ->
                                                             "Okay thanks"
-                                                        // Statements about what they're doing
                                                         lowerBody.contains("i'm") || lowerBody.contains("im ") || lowerBody.contains("i am") -> {
                                                             when {
-                                                                (lowerBody.contains("going") && (lowerBody.contains("shop") || lowerBody.contains("store"))) && 
-                                                                (lowerBody.contains("need") || lowerBody.contains("want") || lowerBody.contains("anything")) -> 
+                                                                (lowerBody.contains("going") && (lowerBody.contains("shop") || lowerBody.contains("store"))) &&
+                                                                (lowerBody.contains("need") || lowerBody.contains("want") || lowerBody.contains("anything")) ->
                                                                     "No I'm good thanks"
-                                                                lowerBody.contains("going") || lowerBody.contains("out") -> 
+                                                                lowerBody.contains("going") || lowerBody.contains("out") ->
                                                                     "Okay thanks"
-                                                                else -> 
+                                                                else ->
                                                                     "Okay thanks"
                                                             }
                                                         }
-                                                        
-                                                        // Task/completion questions
-                                                        lowerBody.contains("did you manage") || lowerBody.contains("did you sort") || 
-                                                        lowerBody.contains("did you get") || lowerBody.contains("have you sorted") ||
-                                                        lowerBody.contains("have you got") -> {
+                                                        lowerBody.contains("did you manage") || lowerBody.contains("did you sort") ||
+                                                         lowerBody.contains("did you get") || lowerBody.contains("have you sorted") ||
+                                                         lowerBody.contains("have you got") -> {
                                                             if (lowerBody.contains("birthday") || lowerBody.contains("present")) {
                                                                 "Yeah I sorted it thanks"
                                                             } else {
                                                                 "Yeah I did thanks"
                                                             }
                                                         }
-                                                        
-                                                        // Yes/No questions - read the actual question
                                                         lowerBody.contains("are you") -> {
                                                             when {
-                                                                lowerBody.contains("coming") && lowerBody.contains("dinner") -> 
+                                                                lowerBody.contains("coming") && lowerBody.contains("dinner") ->
                                                                     "Yeah I'll be there"
-                                                                lowerBody.contains("coming") -> 
+                                                                lowerBody.contains("coming") ->
                                                                     "Yeah I'll be there"
-                                                                lowerBody.contains("still") && lowerBody.contains("coming") -> 
+                                                                lowerBody.contains("still") && lowerBody.contains("coming") ->
                                                                     "Yeah I'll be there"
-                                                                lowerBody.contains("birthday") || lowerBody.contains("present") -> 
+                                                                lowerBody.contains("birthday") || lowerBody.contains("present") ->
                                                                     "Yeah I sorted it thanks"
-                                                                else -> 
+                                                                else ->
                                                                     "Yeah I'm fine thanks"
                                                             }
                                                         }
@@ -526,33 +759,28 @@ class SmsReceiver : BroadcastReceiver() {
                                                                 "Yeah I did thanks"
                                                             }
                                                         }
-                                                        lowerBody.contains("will you") || lowerBody.contains("can you") || 
-                                                        lowerBody.contains("could you") || lowerBody.contains("would you") ||
-                                                        lowerBody.contains("should you") || lowerBody.contains("is it") || 
-                                                        lowerBody.contains("was it") -> {
+                                                        lowerBody.contains("will you") || lowerBody.contains("can you") ||
+                                                         lowerBody.contains("could you") || lowerBody.contains("would you") ||
+                                                         lowerBody.contains("should you") || lowerBody.contains("is it") ||
+                                                         lowerBody.contains("was it") -> {
                                                             if (lowerBody.contains("coming") || lowerBody.contains("be there")) {
                                                                 "Yeah I'll be there"
                                                             } else {
                                                                 "Yeah I did thanks"
                                                             }
                                                         }
-                                                        
-                                                        // "What" questions - read the actual question (check most specific first)
                                                         lowerBody.contains("what") -> {
                                                             when {
-                                                                // Check for weekend question FIRST (more specific)
-                                                                lowerBody.contains("what you doing") && lowerBody.contains("weekend") -> 
+                                                                lowerBody.contains("what you doing") && lowerBody.contains("weekend") ->
                                                                     "Not much, probably just relaxing"
-                                                                lowerBody.contains("what you doing") -> 
+                                                                lowerBody.contains("what you doing") ->
                                                                     "Not much really"
-                                                                lowerBody.contains("what you") || lowerBody.contains("what have you") -> 
+                                                                lowerBody.contains("what you") || lowerBody.contains("what have you") ->
                                                                     "Not much, just been busy. How about you?"
-                                                                else -> 
+                                                                else ->
                                                                     "Not sure, I'll check and let you know"
                                                             }
                                                         }
-                                                        
-                                                        // "How" questions
                                                         lowerBody.contains("how") -> {
                                                             if (lowerBody.contains("how are") || lowerBody.contains("how you")) {
                                                                 "I'm good thanks, how are you?"
@@ -560,48 +788,24 @@ class SmsReceiver : BroadcastReceiver() {
                                                                 "It's going okay thanks"
                                                             }
                                                         }
-                                                        
-                                                        // "When" questions
-                                                        lowerBody.contains("when") -> {
+                                                        lowerBody.contains("when") ->
                                                             "I'll let you know when I know"
-                                                        }
-                                                        
-                                                        // "Where" questions
-                                                        lowerBody.contains("where") -> {
+                                                        lowerBody.contains("where") ->
                                                             "I'm not sure, I'll check"
-                                                        }
-                                                        
-                                                        // "Why" questions
-                                                        lowerBody.contains("why") -> {
+                                                        lowerBody.contains("why") ->
                                                             "Not sure why, I'll find out"
-                                                        }
-                                                        
-                                                        // "Who" questions
-                                                        lowerBody.contains("who") -> {
+                                                        lowerBody.contains("who") ->
                                                             "I'm not sure who"
-                                                        }
-                                                        
-                                                        // Generic questions (has ?) - check this BEFORE the else
-                                                        lowerBody.contains("?") -> {
+                                                        lowerBody.contains("?") ->
                                                             "I'm not sure, I'll check and get back to you"
-                                                        }
-                                                        
-                                                        // If it's a question but didn't match above, give a generic question response
-                                                        isQuestion -> {
+                                                        isQuestion ->
                                                             "I'm not sure, I'll check and let you know"
-                                                        }
-                                                        
-                                                        // Requests (please, can you, get me, etc.) - acknowledge positively
-                                                        lowerBody.contains("please") || lowerBody.contains("can you") || 
-                                                        lowerBody.contains("get me") || lowerBody.contains("pick up") || 
-                                                        lowerBody.contains("grab") || lowerBody.contains("bring") -> {
+                                                        lowerBody.contains("please") || lowerBody.contains("can you") ||
+                                                         lowerBody.contains("get me") || lowerBody.contains("pick up") ||
+                                                         lowerBody.contains("grab") || lowerBody.contains("bring") ->
                                                             "Yes please"
-                                                        }
-                                                        
-                                                        // Statements - only use "Okay thanks" for non-questions
-                                                        else -> {
+                                                        else ->
                                                             "Okay thanks"
-                                                        }
                                                     }
                                                     
                                                     if (fallbackResponse.isNotEmpty()) {

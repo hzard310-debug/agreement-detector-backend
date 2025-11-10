@@ -109,20 +109,29 @@ def script_already_sent(contact_key: str, script_id: str) -> bool:
     return script_id in scripts_sent_by_contact.get(contact_key, set())
 
 
-def _send_direct_telegram_message(message: str, contact_number: str | None = None) -> bool:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
+def _send_direct_telegram_message(
+    message: str,
+    contact_number: str | None = None,
+    bot_token_override: str | None = None,
+    channel_id_override: str | None = None,
+    timeout_override: float | None = None,
+) -> bool:
+    bot_token = (bot_token_override or TELEGRAM_BOT_TOKEN or "").strip()
+    channel_id = (channel_id_override or TELEGRAM_CHANNEL_ID or "").strip()
+    if not bot_token or not channel_id:
         return False
     if not message:
         return False
     text = message
     if contact_number:
         text = f"From: {contact_number}\n\n{text}" if message else f"From: {contact_number}"
-    api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    timeout = timeout_override if timeout_override is not None else TELEGRAM_FORWARD_TIMEOUT
     try:
         response = requests.post(
             api_url,
-            json={"chat_id": TELEGRAM_CHANNEL_ID, "text": text},
-            timeout=TELEGRAM_FORWARD_TIMEOUT,
+            json={"chat_id": channel_id, "text": text},
+            timeout=timeout,
         )
         if response.status_code != 200:
             print(f"Telegram sendMessage error: {response.status_code} {response.text}")
@@ -137,8 +146,13 @@ def _send_direct_telegram_photo(
     photo_url: str,
     caption: str,
     contact_number: str | None = None,
+    bot_token_override: str | None = None,
+    channel_id_override: str | None = None,
+    timeout_override: float | None = None,
 ) -> bool:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
+    bot_token = (bot_token_override or TELEGRAM_BOT_TOKEN or "").strip()
+    channel_id = (channel_id_override or TELEGRAM_CHANNEL_ID or "").strip()
+    if not bot_token or not channel_id:
         return False
     if not photo_url:
         return False
@@ -148,16 +162,17 @@ def _send_direct_telegram_photo(
             f"From: {contact_number}\n\n{caption_text}" if caption_text else f"From: {contact_number}"
         )
     caption_text = caption_text[:1024]
-    api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    api_url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+    timeout = timeout_override if timeout_override is not None else TELEGRAM_FORWARD_TIMEOUT
     try:
         response = requests.post(
             api_url,
             json={
-                "chat_id": TELEGRAM_CHANNEL_ID,
+                "chat_id": channel_id,
                 "photo": photo_url,
                 "caption": caption_text or None,
             },
-            timeout=TELEGRAM_FORWARD_TIMEOUT,
+            timeout=timeout,
         )
         if response.status_code != 200:
             print(f"Telegram sendPhoto error: {response.status_code} {response.text}")
@@ -172,14 +187,25 @@ def forward_payment_confirmation_message(
     contact_number: str,
     message: str,
     media_urls: list[str] | None = None,
+    forward_url_override: str | None = None,
+    api_key_override: str | None = None,
+    bot_token_override: str | None = None,
+    channel_id_override: str | None = None,
+    timeout_override: float | None = None,
 ) -> bool:
     cleaned_message = (message or "").strip()
     media_urls = [url.strip() for url in (media_urls or []) if isinstance(url, str) and url.strip()]
     if not cleaned_message and not media_urls:
         return False
 
-    if TELEGRAM_FORWARD_URL:
-        endpoint = f"{TELEGRAM_FORWARD_URL}/send" if not TELEGRAM_FORWARD_URL.endswith("/send") else TELEGRAM_FORWARD_URL
+    forward_url = (forward_url_override or TELEGRAM_FORWARD_URL or "").strip()
+    api_key = (api_key_override or TELEGRAM_FORWARD_API_KEY or "").strip()
+    bot_token = (bot_token_override or TELEGRAM_BOT_TOKEN or "").strip()
+    channel_id = (channel_id_override or TELEGRAM_CHANNEL_ID or "").strip()
+    timeout = timeout_override if timeout_override is not None else TELEGRAM_FORWARD_TIMEOUT
+
+    if forward_url:
+        endpoint = f"{forward_url}/send" if not forward_url.endswith("/send") else forward_url
         payload: dict[str, object] = {
             "message": cleaned_message or "Payment confirmation received",
             "contact_number": contact_number,
@@ -188,10 +214,10 @@ def forward_payment_confirmation_message(
             # Legacy bot expects photo_url; keep first item for compatibility
             payload["photo_url"] = media_urls[0]
             payload["media_urls"] = media_urls
-        if TELEGRAM_FORWARD_API_KEY:
-            payload["api_key"] = TELEGRAM_FORWARD_API_KEY
+        if api_key:
+            payload["api_key"] = api_key
         try:
-            response = requests.post(endpoint, json=payload, timeout=TELEGRAM_FORWARD_TIMEOUT)
+            response = requests.post(endpoint, json=payload, timeout=timeout)
             if response.status_code != 200:
                 print(f"Telegram forward service error: {response.status_code} {response.text}")
                 return False
@@ -202,10 +228,23 @@ def forward_payment_confirmation_message(
 
     # Fallback: send directly using bot token & channel
     if media_urls:
-        if _send_direct_telegram_photo(media_urls[0], cleaned_message, contact_number):
+        if _send_direct_telegram_photo(
+            media_urls[0],
+            cleaned_message,
+            contact_number,
+            bot_token_override=bot_token,
+            channel_id_override=channel_id,
+            timeout_override=timeout,
+        ):
             return True
 
-    return _send_direct_telegram_message(cleaned_message or "Payment confirmation received", contact_number)
+    return _send_direct_telegram_message(
+        cleaned_message or "Payment confirmation received",
+        contact_number,
+        bot_token_override=bot_token,
+        channel_id_override=channel_id,
+        timeout_override=timeout,
+    )
 
 
 def maybe_forward_payment_confirmation(
@@ -216,8 +255,16 @@ def maybe_forward_payment_confirmation(
     payment_request_sent_flag: bool,
     has_media: bool = False,
     media_urls: list[str] | None = None,
+    forward_url_override: str | None = None,
+    api_key_override: str | None = None,
+    bot_token_override: str | None = None,
+    channel_id_override: str | None = None,
+    enabled_override: bool | None = None,
+    timeout_override: float | None = None,
 ) -> None:
     if not payment_details_sent_flag or not payment_request_sent_flag:
+        return
+    if enabled_override is False:
         return
     if not (text_confirmed or has_media):
         return
@@ -232,7 +279,16 @@ def maybe_forward_payment_confirmation(
     if confirmation_forward_log.get(contact_number) == signature:
         return
 
-    success = forward_payment_confirmation_message(contact_number, message, media_urls)
+    success = forward_payment_confirmation_message(
+        contact_number,
+        message,
+        media_urls,
+        forward_url_override=forward_url_override,
+        api_key_override=api_key_override,
+        bot_token_override=bot_token_override,
+        channel_id_override=channel_id_override,
+        timeout_override=timeout_override,
+    )
     if success:
         confirmation_forward_log[contact_number] = signature
 
@@ -1129,6 +1185,51 @@ def get_response():
         turns = data.get("turns", [])
         state = data.get("state", {})
         payment_details = data.get("payment_details", "").strip()  # Payment details from Android app
+        telegram_config_raw = data.get("telegram_config")
+        telegram_forward_url_override: str | None = None
+        telegram_api_key_override: str | None = None
+        telegram_bot_token_override: str | None = None
+        telegram_channel_id_override: str | None = None
+        telegram_enabled_override: bool | None = None
+        telegram_timeout_override: float | None = None
+        if isinstance(telegram_config_raw, dict):
+            forward_url_val = telegram_config_raw.get("forward_url")
+            if isinstance(forward_url_val, str):
+                cleaned_forward = forward_url_val.strip()
+                if cleaned_forward:
+                    telegram_forward_url_override = cleaned_forward
+            api_key_val = telegram_config_raw.get("api_key")
+            if isinstance(api_key_val, str):
+                cleaned_key = api_key_val.strip()
+                if cleaned_key:
+                    telegram_api_key_override = cleaned_key
+            bot_token_val = telegram_config_raw.get("bot_token")
+            if isinstance(bot_token_val, str):
+                cleaned_token = bot_token_val.strip()
+                if cleaned_token:
+                    telegram_bot_token_override = cleaned_token
+            channel_id_val = telegram_config_raw.get("channel_id")
+            if isinstance(channel_id_val, str):
+                cleaned_channel = channel_id_val.strip()
+                if cleaned_channel:
+                    telegram_channel_id_override = cleaned_channel
+            enabled_val = telegram_config_raw.get("enabled")
+            if isinstance(enabled_val, bool):
+                telegram_enabled_override = enabled_val
+            elif isinstance(enabled_val, (int, float)):
+                telegram_enabled_override = bool(enabled_val)
+            elif isinstance(enabled_val, str):
+                lowered = enabled_val.strip().lower()
+                if lowered in {"true", "1", "yes", "on", "enable", "enabled"}:
+                    telegram_enabled_override = True
+                elif lowered in {"false", "0", "no", "off", "disable", "disabled"}:
+                    telegram_enabled_override = False
+            timeout_val = telegram_config_raw.get("timeout") or telegram_config_raw.get("forward_timeout")
+            if timeout_val is not None:
+                try:
+                    telegram_timeout_override = float(timeout_val)
+                except (TypeError, ValueError):
+                    telegram_timeout_override = None
         
         # Clean out stale duplicate entries (older than 12 hours)
         try:
@@ -1633,6 +1734,12 @@ def get_response():
             payment_request_was_sent,
             has_media=latest_has_media,
             media_urls=latest_media_urls,
+            forward_url_override=telegram_forward_url_override,
+            api_key_override=telegram_api_key_override,
+            bot_token_override=telegram_bot_token_override,
+            channel_id_override=telegram_channel_id_override,
+            enabled_override=telegram_enabled_override,
+            timeout_override=telegram_timeout_override,
         )
 
         if payment_details_was_sent and payment_confirmed_flag and not script_already_sent(contact_key, "script22"):
