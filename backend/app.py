@@ -1489,6 +1489,22 @@ def get_response():
                 return name2
             return name1
 
+        def is_generic_who_question(message: str | None) -> bool:
+            if not message:
+                return False
+            normalized = re.sub(r"[^a-z\s]", " ", message.lower())
+            normalized = re.sub(r"\s+", " ", normalized).strip()
+            generic_phrases = {
+                "who",
+                "who is this",
+                "who s this",
+                "who this",
+                "whos this",
+                "who is dis",
+                "who dis",
+            }
+            return normalized in generic_phrases
+
         def is_reaction_to_save_number(lower_text: str):
             return "dad save my new number" in lower_text and ("liked" in lower_text or "reacted" in lower_text or "loved" in lower_text or "thumbs up" in lower_text)
 
@@ -1665,6 +1681,8 @@ def get_response():
         payment_confirmed_flag = payment_confirmed(latest_lower)
 
         if not (favour_request_sent or payment_request_flag):
+            if is_generic_who_question(latest_msg):
+                return send_immediate_response("Your eldest and favourite", "Special case: generic who question", "script1", use_variant=False)
             chosen_name = choose_name_from_or_question(latest_msg)
             if chosen_name:
                 return send_immediate_response(f"Its {chosen_name}", "Special case: name choice question", "script2_or_choice")
