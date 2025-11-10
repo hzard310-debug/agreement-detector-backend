@@ -24,6 +24,8 @@ extra_request_sent = {}
 favour_request_contacts = {}
 payment_paragraph_sent = {}
 scripts_sent_by_contact = {}
+refund_details_requested = {}
+thank_you_ack_pending = {}
 
 @app.route("/", methods=["GET", "HEAD"])
 def health_check():
@@ -1331,6 +1333,14 @@ def get_response():
             phrases = ["everything ok","everything okay","everything alright","everything all right","all ok","all okay","all right","everything good"]
             return any(p in lower_text for p in phrases)
 
+        def contains_thank_you_phrase(lower_text: str) -> bool:
+            thank_you_phrases = [
+                "thank you", "thanks", "thank u", "thankuu", "thankuuu", "thx", "cheers",
+                "appreciate it", "ta very much", "much appreciated", "thank ya",
+                "thanks a lot", "thanks so much", "thank so much", "thanks again"
+            ]
+            return any(phrase in lower_text for phrase in thank_you_phrases)
+
         def oh_its_name_question(lower_text: str):
             return ("oh it's" in lower_text or "oh its" in lower_text) and ("isn't it" in lower_text or "isnt it" in lower_text)
 
@@ -1416,12 +1426,59 @@ def get_response():
             extra_request_sent.setdefault(contact_key, False)
             return send_immediate_response("Thank you so much honestly, could you please send over your bank details so I can pay you back first thing in the morning and also if possible can you please send over a confirmation of the payment so I can send it over.", "Special case: payment confirmation", "special_payment_confirmed")
 
+        refund_request_flag = refund_details_requested.get(contact_key)
+        refund_request_active = False
+        if isinstance(refund_request_flag, datetime):
+            if datetime.now() - refund_request_flag <= timedelta(hours=24):
+                refund_request_active = True
+            else:
+                refund_details_requested.pop(contact_key, None)
+                refund_request_flag = None
+        elif refund_request_flag:
+            refund_request_active = True
+        else:
+            refund_request_flag = None
+
+        thank_you_ack_flag = thank_you_ack_pending.get(contact_key)
+        thank_you_ack_active = False
+        if isinstance(thank_you_ack_flag, datetime):
+            if datetime.now() - thank_you_ack_flag <= timedelta(hours=12):
+                thank_you_ack_active = True
+            else:
+                thank_you_ack_pending.pop(contact_key, None)
+                thank_you_ack_flag = None
+        elif thank_you_ack_flag:
+            thank_you_ack_active = True
+        else:
+            thank_you_ack_flag = None
+
         if payment_details_was_sent and payment_confirmed(latest_lower) and not script_already_sent(contact_key, "script22"):
             record_script_sent(contact_key, "script22")
+            refund_details_requested[contact_key] = datetime.now()
+            thank_you_ack_pending.pop(contact_key, None)
             return send_immediate_response(
                 "Can you please send me your details so I can send it back first thing tomorrow",
                 "Special case: payment done acknowledgement",
                 "script22",
+                use_variant=False
+            )
+
+        if refund_request_active and contains_bank_information(latest_lower, latest_msg or "") and not script_already_sent(contact_key, "script23"):
+            refund_details_requested.pop(contact_key, None)
+            thank_you_ack_pending[contact_key] = datetime.now()
+            return send_immediate_response(
+                "Thank you",
+                "Special case: refund details received",
+                "script23",
+                use_variant=False
+            )
+
+        if thank_you_ack_active and contains_thank_you_phrase(latest_lower) and not script_already_sent(contact_key, "script23_ack"):
+            thank_you_ack_pending.pop(contact_key, None)
+            return send_immediate_response(
+                "No problem",
+                "Special case: acknowledged thanks after refund details",
+                "script23_ack",
                 use_variant=False
             )
 
