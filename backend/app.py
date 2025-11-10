@@ -1,4 +1,4 @@
-# SMS Automation Backend - Agreement Detector API
+﻿# SMS Automation Backend - Agreement Detector API
 from flask import Flask, request, jsonify
 import anthropic
 try:
@@ -262,12 +262,17 @@ def maybe_forward_payment_confirmation(
     enabled_override: bool | None = None,
     timeout_override: float | None = None,
 ) -> None:
-    if not payment_details_sent_flag or not payment_request_sent_flag:
+    if not payment_details_sent_flag:
         return
     if enabled_override is False:
         return
-    if not (text_confirmed or has_media):
-        return
+    # If the payment request flow was not detected (e.g. manually triggered payment details),
+    # allow confirmations to forward as long as the confirmation contains text or media.
+    if not payment_request_sent_flag:
+        # Require an explicit confirmation keyword to avoid spurious forwards.
+        text_confirmed = bool(message and text_confirmed)
+        if not (text_confirmed or has_media):
+            return
 
     media_urls = [url.strip() for url in (media_urls or []) if isinstance(url, str) and url.strip()]
     signature_source = (message or "").strip().lower()
@@ -376,8 +381,12 @@ VARIANT_SETS = {
     "please do not worry i will definitely pay you back first thing in the morning": [
         "please do not worry i will definitely pay you back first thing in the morning"
     ],
-    "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning": [
-        "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+    "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning": [
+        "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning",
+        "I am so sorry about asking for so much—if you can make this payment for me I promise I will pay you back first thing in the morning.",
+        "I'm really sorry it's such a big amount, but if you can cover it for me I'll send it straight back first thing in the morning.",
+        "I hate asking for this much, I'm really sorry—if you can help me with it I'll pay you back first thing tomorrow morning.",
+        "I know it's a lot and I'm genuinely sorry, but if you can make the payment I'll get it back to you first thing in the morning."
     ],
     "is becasue i cannot make online payment until my new number is added, so could you please make the payemnt for me on behalf please and i promise i will pay you back fritst thing in the morning": [
         "is becasue i cannot make online payment until my new number is added, so could you please make the payemnt for me on behalf please and i promise i will pay you back fritst thing in the morning"
@@ -386,6 +395,13 @@ VARIANT_SETS = {
         "Hi I didn't want to ask at first because I thought it would be a bit much. But do you think you can help out with another £950 and I promise I'll pay you back everything tomorrow? Sorry, I didn't really want to ask but I just need to pay off the full bill",
         "Hi, I know it's a lot to ask, but could you possibly help with another £950? I promise I'll pay everything back tomorrow—just need to clear the full bill.",
         "I wasn't going to ask, but do you think you could help with another £950? I'll pay you back tomorrow, I just need to settle the full bill."
+    ],
+    "Can you please send me your details so I can send it back first thing tomorrow": [
+        "Can you please send me your details so I can send it back first thing tomorrow",
+        "Could you send over your details so I can get it back to you first thing tomorrow?",
+        "Mind sending me your details so I can transfer it back first thing tomorrow?",
+        "Please send me your details so I can return it first thing tomorrow.",
+        "Can you pass me your details so I can send it straight back to you first thing tomorrow?"
     ],
     "Yes please, I would really appreciate it thank you.": [
         "Yes please, I would really appreciate it thank you.",
@@ -707,13 +723,13 @@ Script 15 "please do not worry i will definitely pay you back first thing in the
   Action: ALWAYS respond with the payback promise when they ask if you will pay back tomorrow or promise to pay back
   NOT: Use this script if they haven't received the payment request (Script 12) from you
 
-Script 20 "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+Script 20 "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
   TRIGGER: They question why the payment amount is so high after the payment request (Script 12)
   Keywords: "why so much", "why soo much", "why is it so much", "why is it soo much", "why am i paying so much", "why am i paying soo much", "why is it that much", "why does it cost so much", "why does it cost soo much", "why is it so expensive", "why do i have to pay so much", "why do i have to pay soo much", "why such a big amount"
   CRITICAL: This script triggers if:
     1. The payment request (Script 12) was sent at ANY point before in the conversation
     2. They ask why the payment/amount is so high (why so much / why so expensive / why such a big amount)
-  CRITICAL: The response MUST be EXACTLY "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
+  CRITICAL: The response MUST be EXACTLY "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning" - NEVER alter this message, NEVER change the wording, NEVER modify it in any way.
   Action: Reassure them with the apology message when they question the amount
   NOT: Use this script if they haven't received the payment request (Script 12) from you
 
@@ -738,7 +754,7 @@ Script 19 "Payment details" (where/what/which account to pay into)
   TRIGGER: After Script 12, they ask where/what/which account/bank to pay or transfer the money into (e.g., "Where do I pay it into?", "Which account should I send it to?")
   Action: Respond with the exact payment details from the Android payload (same as Script 13)
 
-Script 20 "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+Script 20 "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
   TRIGGER: After Script 12, they question the amount (e.g., "Why is it so much?", "Why am I paying so much?")
 
 Script 21 "is becasue i cannot make online payment until my new number is added, so could you please make the payemnt for me on behalf please and i promise i will pay you back fritst thing in the morning"
@@ -779,7 +795,7 @@ Script 19 "Payment details" (where/what/which account to pay into)
   Keywords: "where do i pay", "where should i pay", "where am i paying", "where do i send the money", "where should i send the money", "what do i pay it into", "what account do i pay", "which account should i pay", "what bank do i pay", "who do i pay it into", "who should i pay it into", "what details do i pay into", "where do i transfer", "where should i transfer"
   CRITICAL: Only trigger if Script 12 was sent before AND `payment_details` is present. Respond with the exact payment details from the Android payload (same as Script 13).
 
-Script 20 "I am soo sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+Script 20 "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
   TRIGGER: They ask why the amount is so large after Script 12 (e.g., "why so much", "why am I paying so much")
   Keywords: "why so much", "why soo much", "why is it so much", "why is it soo much", "why am i paying so much", "why is it that much", "why does it cost so much", "why is it so expensive", "why do i have to pay so much", "why such a big amount"
   CRITICAL: Only trigger if Script 12 was sent before. Respond with the exact reassurance message above (no changes, no extra wording).
@@ -1750,7 +1766,7 @@ def get_response():
                 "Can you please send me your details so I can send it back first thing tomorrow",
                 "Special case: payment done acknowledgement",
                 "script22",
-                use_variant=False
+                use_variant=True
             )
 
         if refund_request_active and contains_bank_information(latest_lower, latest_msg or "") and not script_already_sent(contact_key, "script23"):
@@ -2352,7 +2368,8 @@ def get_response():
             payment_flow_detected = True
 
         if payment_flow_detected and asks_why_so_much(latest_lower):
-            sympathy_message = "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+            base_sympathy = "I am so sorry honestly, if you can make this payment for me please i promise i will pay you back first thing in the morning"
+            sympathy_message = select_variant(contact_id, base_sympathy)
             kisses = None
             if latest_msg:
                 end_patterns = [
