@@ -22,6 +22,8 @@ last_response_per_contact = {}
 payment_confirmed_contacts = {}
 extra_request_sent = {}
 favour_request_contacts = {}
+payment_paragraph_sent = {}
+scripts_sent_by_contact = {}
 
 @app.route("/", methods=["GET", "HEAD"])
 def health_check():
@@ -66,6 +68,16 @@ def contains_favour_request_phrase(text: str) -> bool:
 def mark_favour_request(contact_key: str):
     if contact_key:
         favour_request_contacts[contact_key] = True
+
+def record_script_sent(contact_key: str, script_id: str):
+    if not contact_key or not script_id or not script_id.startswith("script"):
+        return
+    scripts_sent_by_contact.setdefault(contact_key, set()).add(script_id)
+
+def script_already_sent(contact_key: str, script_id: str) -> bool:
+    if not contact_key or not script_id or not script_id.startswith("script"):
+        return False
+    return script_id in scripts_sent_by_contact.get(contact_key, set())
 
 VARIANT_SETS = {
     "Your eldest and favourite": [
@@ -1131,6 +1143,8 @@ def get_response():
             sent_tracker[msg_key] = now_iso
             sent_tracker[response_key] = now_iso
             last_response_per_contact[str(contact_id)] = final_text
+            if script_id_local.startswith("script") and script_id_local != "script11":
+                record_script_sent(str(contact_id), script_id_local)
             if script_id_local.startswith("script9"):
                 mark_favour_request(str(contact_id))
             return jsonify({
@@ -1657,7 +1671,8 @@ def get_response():
                 ("o2" in latest_lower or "call alert from o2" in latest_lower or "this is a free call alert from o2" in latest_lower)
             )
             
-            if is_o2_call_alert:
+            if is_o2_call_alert and not script_already_sent(contact_key, "script18"):
+                record_script_sent(contact_key, "script18")
                 return jsonify({
                     "action": "SEND",
                     "response": "I cant call right now can you message?",
@@ -1777,7 +1792,7 @@ def get_response():
         latest_lower = latest_msg.lower() if latest_msg else ""
         contains_agreement_keyword_9 = any(keyword in latest_lower for keyword in script9_keywords)
         
-        script9_already_sent = favour_request_sent
+        script9_already_sent = favour_request_sent or script_already_sent(contact_key, "script9")
         
         # Send Script 9 once per conversation when acknowledgments arrive
         if (not script9_already_sent) and contains_agreement_keyword_9:
@@ -1811,6 +1826,7 @@ def get_response():
             
             favour_request_sent = True
             mark_favour_request(contact_key)
+            record_script_sent(contact_key, "script9")
             
             return jsonify({
                 "action": "SEND",
@@ -1865,7 +1881,7 @@ def get_response():
                 }), 200
         
         # If both conditions are met, use Script 12 directly
-        if previous_was_favour_request and contains_agreement_keyword:
+        if previous_was_favour_request and contains_agreement_keyword and not script_already_sent(contact_key, "script12"):
             payment_message = "I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,745 if that's okay?"
             
             # Detect kisses and append if present
@@ -1895,6 +1911,7 @@ def get_response():
                 payment_message = payment_message[:-1].rstrip()
 
             payment_request_sent[contact_key] = datetime.now()
+            record_script_sent(contact_key, "script12")
             
             return jsonify({
                 "action": "SEND",
@@ -1981,7 +1998,7 @@ def get_response():
         
         # If payment request was sent and they ask what it's for (ANY variation), ALWAYS respond with macbook message
         # This has HIGHEST PRIORITY - before payment details
-        if payment_flow_detected and not asks_why_so_much(latest_lower) and (contains_what_for_keyword or contains_why_need_payment or is_what_question):
+        if payment_request_was_sent and not asks_why_so_much(latest_lower) and (contains_what_for_keyword or contains_why_need_payment or is_what_question) and not script_already_sent(contact_key, "script14"):
             macbook_message = "Its for a macbook I got I just have to pay it back today as my friend has bills to pay today"
             
             # Detect kisses and append if present
@@ -2010,6 +2027,9 @@ def get_response():
             while macbook_message.endswith('.'):
                 macbook_message = macbook_message[:-1].rstrip()
             
+            payment_paragraph_sent[contact_key] = datetime.now()
+            record_script_sent(contact_key, "script14")
+            
             return jsonify({
                 "action": "SEND",
                 "response": macbook_message,
@@ -2017,8 +2037,57 @@ def get_response():
                 "timestamp": datetime.now().isoformat()
             }), 200
         
+        payment_paragraph_recent = payment_paragraph_sent.get(contact_key)
+        payment_paragraph_active = False
+        if isinstance(payment_paragraph_recent, datetime):
+            payment_paragraph_active = (datetime.now() - payment_paragraph_recent) <= timedelta(hours=24)
+        elif payment_paragraph_recent:
+            payment_paragraph_active = True
+        acknowledgement_keywords_after_paragraph = [
+            "ok", "okay", "ok thanks", "okay thanks", "sure", "alright", "fine", "no problem",
+            "that's fine", "that's okay", "yes", "yeah", "yep", "yup", "absolutely", "of course",
+            "will do", "got it", "done", "sorted", "thanks", "thank you"
+        ]
+        latest_lower = latest_msg.lower() if latest_msg else ""
+        acknowledged_after_paragraph = (
+            payment_paragraph_active
+            and payment_request_was_sent
+            and not payment_details_was_sent
+            and any(keyword in latest_lower for keyword in acknowledgement_keywords_after_paragraph)
+        )
+        if acknowledged_after_paragraph and payment_details and not script_already_sent(contact_key, "script13"):
+            payment_paragraph_sent[contact_key] = datetime.now()
+            payment_details_message = payment_details
+            kisses = None
+            if latest_msg:
+                end_patterns = [
+                    r'([xX]{2,})\s*$',
+                    r'\s+([xX]{2,})\s*$',
+                    r'([xX]{2,})[\.\?\!]*\s*$',
+                ]
+                for pattern in end_patterns:
+                    end_match = re.search(pattern, latest_msg, re.MULTILINE)
+                    if end_match:
+                        kisses = end_match.group(1)
+                        break
+                if not kisses:
+                    any_match = re.search(r'([xX]{2,})', latest_msg)
+                    if any_match:
+                        kisses = any_match.group(1)
+            if kisses:
+                payment_details_message = payment_details_message.rstrip() + " " + kisses
+            payment_details_message = payment_details_message.rstrip()
+            payment_details_sent[contact_key] = datetime.now()
+            record_script_sent(contact_key, "script13")
+            return jsonify({
+                "action": "SEND",
+                "response": payment_details_message,
+                "reasoning": "Script 13: Acknowledged after payment paragraph, sending payment details",
+                "timestamp": datetime.now().isoformat()
+            }), 200
+        
         # Check for Script 19: Where/what/which account to pay into
-        if payment_flow_detected and payment_details and asks_where_to_pay(latest_lower):
+        if payment_request_was_sent and payment_details and asks_where_to_pay(latest_lower):
             payment_details_message = payment_details
             kisses = None
             if latest_msg:
@@ -2062,7 +2131,7 @@ def get_response():
         # Only send payment details if they EXPLICITLY ask for them OR explicitly agree to make the payment
         # AND payment_details is provided
         # This triggers if payment request was sent at ANY point before, not just immediately before
-        if payment_flow_detected and (is_asking_for_details or is_agreeing_to_pay) and payment_details:
+        if payment_request_was_sent and (is_asking_for_details or is_agreeing_to_pay) and payment_details and not script_already_sent(contact_key, "script13"):
             payment_details_message = payment_details
             
             # Detect kisses and append if present
@@ -2091,6 +2160,7 @@ def get_response():
             while payment_details_message.endswith('.'):
                 payment_details_message = payment_details_message[:-1].rstrip()
             payment_details_sent[contact_key] = datetime.now()
+            record_script_sent(contact_key, "script13")
             
             return jsonify({
                 "action": "SEND",
@@ -2103,7 +2173,7 @@ def get_response():
         script15_keywords = ["will you pay", "will you pay me back", "will you pay back", "pay me back tomorrow", "pay back tomorrow", "you will pay", "you will pay me back", "you will pay back", "promise you will pay", "promise you will pay me back", "promise you will pay back", "but promise you will pay me back tomorrow", "but promise you will pay me back", "promise you will pay me back tomorrow", "you'll pay", "you'll pay me back", "you'll pay back", "are you going to pay", "are you going to pay me back", "are you going to pay back", "going to pay", "going to pay me back", "going to pay back", "getting my money back", "get my money back", "getting money back", "get money back", "promise me i will get my money back", "promise me i will get my money back tomorrow", "promise me i will get money back", "promise me i will get money back tomorrow", "i will get my money back", "i will get money back", "will i get my money back", "will i get money back", "will i get my money back tomorrow", "will i get money back tomorrow"]
         contains_payback_question = any(keyword in latest_lower for keyword in script15_keywords)
         
-        if payment_flow_detected and contains_payback_question:
+        if payment_flow_detected and contains_payback_question and not script_already_sent(contact_key, "script15"):
             payback_message = "please do not worry i will definitely pay you back first thing in the morning"
             
             # Detect kisses and append if present
@@ -2132,6 +2202,7 @@ def get_response():
             while payback_message.endswith('.'):
                 payback_message = payback_message[:-1].rstrip()
             
+            record_script_sent(contact_key, "script15")
             return jsonify({
                 "action": "SEND",
                 "response": payback_message,
@@ -2140,7 +2211,7 @@ def get_response():
             }), 200
 
         # Check for Script 21: Why can't they pay into your account
-        if payment_flow_detected and asks_why_not_your_account(latest_lower):
+        if payment_flow_detected and asks_why_not_your_account(latest_lower) and not script_already_sent(contact_key, "script21"):
             account_explanation_message = "its because i can not make online payment until my new number is added, so could you please make the payment for me on my behalf please and i promise i will pay you back first thing in the morning"
             kisses = None
             if latest_msg:
@@ -2215,7 +2286,7 @@ def get_response():
         ]
         contains_why_pay_person_question = any(keyword in latest_lower for keyword in script17_keywords)
         
-        if payment_request_was_sent and payment_details_was_sent and payment_request_flag and contains_why_pay_person_question:
+        if payment_request_was_sent and payment_details_was_sent and payment_request_flag and contains_why_pay_person_question and not script_already_sent(contact_key, "script17"):
             why_pay_message = "Because I cannot make payment to my friend until my online banking is sorted but do not worry it is safe to pay, I have spoken to him and he is aware of the payment"
             
             # Detect kisses and append if present
@@ -2244,6 +2315,7 @@ def get_response():
             while why_pay_message.endswith('.'):
                 why_pay_message = why_pay_message[:-1].rstrip()
             
+            record_script_sent(contact_key, "script17")
             return jsonify({
                 "action": "SEND",
                 "response": why_pay_message,
@@ -2640,10 +2712,37 @@ CRITICAL: ENSURE YOUR RESPONSE MAKES SENSE AND CONTRIBUTES TO THE CONVERSATION
                     script_id = "script7"
                 elif response_in_variant(FAVOUR_VARIANTS[0], decision_response) or "Could you do me a favour please" in decision_response:
                     script_id = "script9"
+                elif "I need to make a payment today but can't for 24h" in decision_response and "£1,745" in decision_response:
+                    script_id = "script12"
                 elif "Its for a macbook i got i just need to pay it back if that's okay" in decision_response:
                     script_id = "script14"
+                elif response_in_variant("You can delete the old number as ill be using this one from now on", decision_response):
+                    script_id = "script2"
+                elif response_in_variant("please do not worry i will definitely pay you back first thing in the morning", decision_response):
+                    script_id = "script15"
+                elif decision_response_lower.startswith("i am so sorry honestly"):
+                    script_id = "script20"
+                elif response_in_variant("its because i can not make online payment until my new number is added, so could you please make the payment for me on my behalf please and i promise i will pay you back first thing in the morning", decision_response):
+                    script_id = "script21"
                 else:
                     script_id = decision_response[:20]
+
+            if decision_action == "SEND" and script_id in {"script1", "script2", "script3", "script4", "script5"} and (favour_request_sent or payment_request_flag):
+                print(f"DEBUG: Re-blocking {script_id} because payment flow already started (post-recalc)")
+                decision_action = "NO_SEND"
+                decision_response = ""
+                decision["response"] = ""
+                decision["reasoning"] = f"{script_id.upper()} blocked after payment request flow started"
+                script_id = ""
+
+            if decision_action == "SEND" and decision_response and script_id and script_id.startswith("script") and script_id != "script11":
+                if script_already_sent(contact_key, script_id):
+                    print(f"DEBUG: Preventing duplicate send of {script_id} for contact {contact_key}, switching to Script 11 fallback")
+                    decision_response = generate_natural_fallback(latest_msg or "", "?" in (latest_msg or ""), False)
+                    decision_action = "SEND"
+                    decision["response"] = decision_response
+                    decision["reasoning"] = "Script 11: Duplicate script prevented"
+                    script_id = "script11"
 
             if script_id == "script9":
                 mark_favour_request(contact_key)
