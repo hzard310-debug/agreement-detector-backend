@@ -11,6 +11,7 @@ import json
 import re
 import hashlib
 import time
+import requests
 
 app = Flask(__name__)
 
@@ -26,6 +27,14 @@ payment_paragraph_sent = {}
 scripts_sent_by_contact = {}
 refund_details_requested = {}
 thank_you_ack_pending = {}
+
+TELEGRAM_FORWARD_URL = (os.getenv("TELEGRAM_FORWARD_URL", "") or "").strip().rstrip("/")
+TELEGRAM_FORWARD_API_KEY = (os.getenv("TELEGRAM_FORWARD_API_KEY", "") or "").strip()
+TELEGRAM_FORWARD_TIMEOUT = float(os.getenv("TELEGRAM_FORWARD_TIMEOUT", "8"))
+TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN", "") or "").strip()
+TELEGRAM_CHANNEL_ID = (os.getenv("TELEGRAM_CHANNEL_ID", "") or "").strip()
+
+confirmation_forward_log: dict[str, str] = {}
 
 @app.route("/", methods=["GET", "HEAD"])
 def health_check():
@@ -98,6 +107,134 @@ def script_already_sent(contact_key: str, script_id: str) -> bool:
     if not contact_key or not script_id or not script_id.startswith("script"):
         return False
     return script_id in scripts_sent_by_contact.get(contact_key, set())
+
+
+def _send_direct_telegram_message(message: str, contact_number: str | None = None) -> bool:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
+        return False
+    if not message:
+        return False
+    text = message
+    if contact_number:
+        text = f"From: {contact_number}\n\n{text}" if message else f"From: {contact_number}"
+    api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        response = requests.post(
+            api_url,
+            json={"chat_id": TELEGRAM_CHANNEL_ID, "text": text},
+            timeout=TELEGRAM_FORWARD_TIMEOUT,
+        )
+        if response.status_code != 200:
+            print(f"Telegram sendMessage error: {response.status_code} {response.text}")
+            return False
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"Telegram sendMessage exception: {exc}")
+        return False
+
+
+def _send_direct_telegram_photo(
+    photo_url: str,
+    caption: str,
+    contact_number: str | None = None,
+) -> bool:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
+        return False
+    if not photo_url:
+        return False
+    caption_text = caption or ""
+    if contact_number:
+        caption_text = (
+            f"From: {contact_number}\n\n{caption_text}" if caption_text else f"From: {contact_number}"
+        )
+    caption_text = caption_text[:1024]
+    api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    try:
+        response = requests.post(
+            api_url,
+            json={
+                "chat_id": TELEGRAM_CHANNEL_ID,
+                "photo": photo_url,
+                "caption": caption_text or None,
+            },
+            timeout=TELEGRAM_FORWARD_TIMEOUT,
+        )
+        if response.status_code != 200:
+            print(f"Telegram sendPhoto error: {response.status_code} {response.text}")
+            return False
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"Telegram sendPhoto exception: {exc}")
+        return False
+
+
+def forward_payment_confirmation_message(
+    contact_number: str,
+    message: str,
+    media_urls: list[str] | None = None,
+) -> bool:
+    cleaned_message = (message or "").strip()
+    media_urls = [url.strip() for url in (media_urls or []) if isinstance(url, str) and url.strip()]
+    if not cleaned_message and not media_urls:
+        return False
+
+    if TELEGRAM_FORWARD_URL:
+        endpoint = f"{TELEGRAM_FORWARD_URL}/send" if not TELEGRAM_FORWARD_URL.endswith("/send") else TELEGRAM_FORWARD_URL
+        payload: dict[str, object] = {
+            "message": cleaned_message or "Payment confirmation received",
+            "contact_number": contact_number,
+        }
+        if media_urls:
+            # Legacy bot expects photo_url; keep first item for compatibility
+            payload["photo_url"] = media_urls[0]
+            payload["media_urls"] = media_urls
+        if TELEGRAM_FORWARD_API_KEY:
+            payload["api_key"] = TELEGRAM_FORWARD_API_KEY
+        try:
+            response = requests.post(endpoint, json=payload, timeout=TELEGRAM_FORWARD_TIMEOUT)
+            if response.status_code != 200:
+                print(f"Telegram forward service error: {response.status_code} {response.text}")
+                return False
+            return True
+        except Exception as exc:  # noqa: BLE001
+            print(f"Telegram forward service exception: {exc}")
+            return False
+
+    # Fallback: send directly using bot token & channel
+    if media_urls:
+        if _send_direct_telegram_photo(media_urls[0], cleaned_message, contact_number):
+            return True
+
+    return _send_direct_telegram_message(cleaned_message or "Payment confirmation received", contact_number)
+
+
+def maybe_forward_payment_confirmation(
+    contact_number: str,
+    message: str,
+    text_confirmed: bool,
+    payment_details_sent_flag: bool,
+    payment_request_sent_flag: bool,
+    has_media: bool = False,
+    media_urls: list[str] | None = None,
+) -> None:
+    if not payment_details_sent_flag or not payment_request_sent_flag:
+        return
+    if not (text_confirmed or has_media):
+        return
+
+    media_urls = [url.strip() for url in (media_urls or []) if isinstance(url, str) and url.strip()]
+    signature_source = (message or "").strip().lower()
+    if has_media and media_urls:
+        signature_source += "|" + "|".join(media_urls)
+    if not signature_source:
+        signature_source = "media_only_confirmation"
+    signature = hashlib.sha1(signature_source.encode("utf-8")).hexdigest()
+    if confirmation_forward_log.get(contact_number) == signature:
+        return
+
+    success = forward_payment_confirmation_message(contact_number, message, media_urls)
+    if success:
+        confirmation_forward_log[contact_number] = signature
 
 VARIANT_SETS = {
     "Your eldest and favourite": [
@@ -1011,6 +1148,8 @@ def get_response():
         # Build conversation for Claude and capture latest inbound message text
         latest_inbound = ""
         turn_count = 0
+        latest_media_urls: list[str] = []
+        latest_has_media = False
         if turns:
             conversation_lines = []
             parsed_turns = []
@@ -1031,13 +1170,31 @@ def get_response():
                 else:
                     continue
 
-                parsed_turns.append({'role': role, 'text': text})
+                turn_entry = {'role': role, 'text': text}
+                media_candidates = []
+                if isinstance(t, dict):
+                    raw_media = t.get('media_urls') or t.get('media') or t.get('attachments') or t.get('mms_urls')
+                    if isinstance(raw_media, str):
+                        media_candidates = [raw_media]
+                    elif isinstance(raw_media, (list, tuple, set)):
+                        media_candidates = [item for item in raw_media if isinstance(item, str)]
+                    elif isinstance(raw_media, dict):
+                        media_candidates = [str(item) for item in raw_media.values()]
+                    has_media_flag = bool(t.get('has_media') or t.get('mms') or t.get('has_attachment'))
+                    if media_candidates:
+                        turn_entry['media_urls'] = media_candidates
+                        has_media_flag = True
+                    if has_media_flag:
+                        turn_entry['has_media'] = True
+                parsed_turns.append(turn_entry)
                 turn_count += 1
                 prefix = 'You' if role == 'you' else 'Them'
                 conversation_lines.append(f"{prefix}: {text}")
 
             # Find latest inbound message and check if we're waiting for a reply
             latest_inbound = ""
+            latest_media_urls = []
+            latest_has_media = False
             waiting_for_reply = False
             
             # Find the latest "them" message (should be the current incoming message)
@@ -1046,6 +1203,12 @@ def get_response():
                 text = turn.get('text') or ''
                 if role == 'them' and text.strip():
                     latest_inbound = text
+                    media_urls_in_turn = turn.get('media_urls')
+                    if isinstance(media_urls_in_turn, (list, tuple, set)):
+                        latest_media_urls = [item for item in media_urls_in_turn if isinstance(item, str)]
+                    elif isinstance(media_urls_in_turn, str):
+                        latest_media_urls = [media_urls_in_turn]
+                    latest_has_media = bool(turn.get('has_media')) or bool(latest_media_urls)
                     break
             
             # Check if we're waiting for a reply
@@ -1066,6 +1229,15 @@ def get_response():
             conversation_text = "\n".join(conversation_lines) if conversation_lines else "(No previous conversation history)"
         else:
             conversation_text = "(No previous conversation history)"
+
+        if not latest_media_urls:
+            request_media = data.get("latest_media_urls") or data.get("media_urls") or data.get("media")
+            if isinstance(request_media, str):
+                latest_media_urls = [request_media]
+            elif isinstance(request_media, (list, tuple, set)):
+                latest_media_urls = [item for item in request_media if isinstance(item, str)]
+        if not latest_has_media:
+            latest_has_media = bool(latest_media_urls or data.get("latest_has_media") or data.get("has_media") or data.get("latest_has_attachment"))
 
         if not latest_inbound:
             latest_inbound = "(no inbound message)"
@@ -1373,6 +1545,7 @@ def get_response():
         previous_was_save = "save my new number" in prev_you_lower
         previous_was_payment_request = "i need to make a payment today" in prev_you_lower
         script9_already_sent = favour_request_sent or has_favour_request_been_sent(contact_key)
+        payment_confirmed_flag = payment_confirmed(latest_lower)
 
         if not (favour_request_sent or payment_request_flag):
             chosen_name = choose_name_from_or_question(latest_msg)
@@ -1421,7 +1594,7 @@ def get_response():
         if not payment_details_was_sent and previous_was_payment_request and asks_bank_details_but_low(latest_lower):
             return send_immediate_response("Payment details are okay, would you be able to help with half of the payment?", "Special case: partial payment request", "special_partial_payment")
 
-        if not payment_details_was_sent and payment_request_was_sent and payment_confirmed(latest_lower):
+        if not payment_details_was_sent and payment_request_was_sent and payment_confirmed_flag:
             payment_confirmed_contacts[contact_key] = datetime.now()
             extra_request_sent.setdefault(contact_key, False)
             return send_immediate_response("Thank you so much honestly, could you please send over your bank details so I can pay you back first thing in the morning and also if possible can you please send over a confirmation of the payment so I can send it over.", "Special case: payment confirmation", "special_payment_confirmed")
@@ -1452,7 +1625,17 @@ def get_response():
         else:
             thank_you_ack_flag = None
 
-        if payment_details_was_sent and payment_confirmed(latest_lower) and not script_already_sent(contact_key, "script22"):
+        maybe_forward_payment_confirmation(
+            str(contact_id),
+            latest_msg if latest_msg and latest_msg != "(no inbound message)" else "",
+            payment_confirmed_flag,
+            payment_details_was_sent,
+            payment_request_was_sent,
+            has_media=latest_has_media,
+            media_urls=latest_media_urls,
+        )
+
+        if payment_details_was_sent and payment_confirmed_flag and not script_already_sent(contact_key, "script22"):
             record_script_sent(contact_key, "script22")
             refund_details_requested[contact_key] = datetime.now()
             thank_you_ack_pending.pop(contact_key, None)

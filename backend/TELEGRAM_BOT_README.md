@@ -1,6 +1,6 @@
 # Telegram Bot Setup Guide
 
-This Python Telegram bot receives payment confirmations from the Android app and forwards them to your Telegram channel.
+This Python Telegram bot receives payment confirmations from the Android app or backend and forwards them to your Telegram channel.
 
 ## Deployment on Render
 
@@ -53,28 +53,29 @@ This Python Telegram bot receives payment confirmations from the Android app and
 
 ## How It Works
 
-- **Direct Mode (Default):** If no Bot Server URL is set, the app sends directly to Telegram API
-- **Bot Server Mode:** If Bot Server URL is set, the app sends to your bot server, which then forwards to Telegram
-  - This keeps your bot token secure on the server
+- **Direct Mode (Default):** If no Bot Server URL is set, the app or backend can send directly to Telegram API
+- **Bot Server Mode:** If Bot Server URL is set, the app/backend sends to your bot server, which then forwards to Telegram
+  - Keeps your bot token secure on the server
   - Allows for additional processing/logging
-  - Keeps the server alive with keep-alive mechanism
+  - Keeps the server awake with a keep-alive mechanism
 
 ## Keep-Alive Mechanism
 
 The bot includes a built-in keep-alive mechanism that:
 - Pings the `/health` endpoint every 5 minutes
 - Optionally pings an external keep-alive service
-- Prevents the Render service from sleeping (on free tier, services sleep after 15 minutes of inactivity)
+- Helps prevent the Render service from sleeping (on free tier, services sleep after 15 minutes of inactivity)
 
 ## API Endpoints
 
 - `GET /` - Service info
 - `GET /health` - Health check (used for keep-alive)
-- `POST /send` - Receive message from Android app
+- `POST /send` - Receive message from Android/backend
   ```json
   {
     "message": "Payment sent",
     "contact_number": "+1234567890",
+    "media_urls": ["https://example.com/photo.jpg"],
     "api_key": "your-api-key" // Optional
   }
   ```
@@ -84,4 +85,5 @@ The bot includes a built-in keep-alive mechanism that:
 - **Bot not responding:** Check that bot token and channel ID are correct
 - **Messages not forwarding:** Verify bot has admin rights in the channel
 - **Server sleeping:** The keep-alive mechanism should prevent this, but you can also use external services like UptimeRobot
+
 
