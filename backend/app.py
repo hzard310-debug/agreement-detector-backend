@@ -1711,10 +1711,21 @@ def get_response():
         if not payment_details_was_sent and previous_was_payment_request and asks_bank_details_but_low(latest_lower):
             return send_immediate_response("Payment details are okay, would you be able to help with half of the payment?", "Special case: partial payment request", "special_partial_payment")
 
-        if not payment_details_was_sent and payment_request_was_sent and payment_confirmed_flag:
+        def send_refund_details_request_response():
+            record_script_sent(contact_key, "script22")
+            refund_details_requested[contact_key] = datetime.now()
+            thank_you_ack_pending.pop(contact_key, None)
+            return send_immediate_response(
+                "Can you please send me your details so I can send it back first thing tomorrow",
+                "Special case: payment done acknowledgement",
+                "script22",
+                use_variant=True
+            )
+
+        if not payment_details_was_sent and payment_request_was_sent and payment_confirmed_flag and not script_already_sent(contact_key, "script22"):
             payment_confirmed_contacts[contact_key] = datetime.now()
             extra_request_sent.setdefault(contact_key, False)
-            return send_immediate_response("Thank you so much honestly, could you please send over your bank details so I can pay you back first thing in the morning and also if possible can you please send over a confirmation of the payment so I can send it over.", "Special case: payment confirmation", "special_payment_confirmed")
+            return send_refund_details_request_response()
 
         refund_request_flag = refund_details_requested.get(contact_key)
         refund_request_active = False
@@ -1759,15 +1770,7 @@ def get_response():
         )
 
         if payment_details_was_sent and payment_confirmed_flag and not script_already_sent(contact_key, "script22"):
-            record_script_sent(contact_key, "script22")
-            refund_details_requested[contact_key] = datetime.now()
-            thank_you_ack_pending.pop(contact_key, None)
-            return send_immediate_response(
-                "Can you please send me your details so I can send it back first thing tomorrow",
-                "Special case: payment done acknowledgement",
-                "script22",
-                use_variant=True
-            )
+            return send_refund_details_request_response()
 
         if refund_request_active and contains_bank_information(latest_lower, latest_msg or "") and not script_already_sent(contact_key, "script23"):
             refund_details_requested.pop(contact_key, None)
@@ -3312,17 +3315,21 @@ Analyze the conversation and provide an ALTERNATIVE response.
                     # No previous entry - this is a new message, allow it
                     print(f"ALLOWING: New incoming message, allowing {script_id} to {contact_id}")
 
-            if allow_send and decision_action == "SEND" and decision_response:
-                # Track both script_id and response content
-                sent_tracker[msg_key] = datetime.now().isoformat()
-                if response_key:
-                    sent_tracker[response_key] = datetime.now().isoformat()
-                print(f"TRACKED: Sending '{script_id}' to {contact_id}")
-            elif not allow_send:
-                decision_action = "NO_SEND"
-                decision_response = ""
-                if "reasoning" not in decision or "alternative" not in decision.get("reasoning", "").lower():
-                    decision["reasoning"] = "Already sent this message to this contact (duplicate prevention)"
+        if allow_send and decision_action == "SEND" and decision_response:
+            # Track both script_id and response content
+            sent_tracker[msg_key] = datetime.now().isoformat()
+            if response_key:
+                sent_tracker[response_key] = datetime.now().isoformat()
+            print(f"TRACKED: Sending '{script_id}' to {contact_id}")
+        elif not allow_send:
+            decision_action = "NO_SEND"
+            decision_response = ""
+            if "reasoning" not in decision or "alternative" not in decision.get("reasoning", "").lower():
+                decision["reasoning"] = "Already sent this message to this contact (duplicate prevention)"
+
+        if payment_confirmed_flag and not script_already_sent(contact_key, "script22"):
+            if payment_details_was_sent or payment_request_was_sent:
+                return send_refund_details_request_response()
 
         # Process response: detect kisses and remove trailing periods
         if decision_action == "SEND" and decision_response:
