@@ -2161,7 +2161,7 @@ def get_response():
                              any(pattern in latest_lower for pattern in why_question_patterns)
             
             if is_why_question:
-                script3_message = "I've got a new plan with O2 and decided to keep the new number"
+                combo_message = "I've got a new plan with O2 and decided to keep the new number. Could you do me a favour please?"
                 
                 # Detect kisses and append if present
                 kisses = None
@@ -2182,19 +2182,21 @@ def get_response():
                             kisses = any_match.group(1)
                 
                 if kisses:
-                    script3_message = script3_message.rstrip() + " " + kisses
+                    combo_message = combo_message.rstrip() + " " + kisses
                 
-                # Remove trailing periods
-                script3_message = script3_message.rstrip()
-                while script3_message.endswith('.'):
-                    script3_message = script3_message[:-1].rstrip()
+                combo_message = combo_message.rstrip()
+                while combo_message.endswith('.'):
+                    combo_message = combo_message[:-1].rstrip()
                 
-                return jsonify({
-                    "action": "SEND",
-                    "response": script3_message,
-                    "reasoning": "Script 3: Previous message was 'Dad save my new number' and current message asks why",
-                    "timestamp": datetime.now().isoformat()
-                }), 200
+                favour_request_sent = True
+                mark_favour_request(contact_key)
+                
+                return send_immediate_response(
+                    combo_message,
+                    "Special case: why new number with favour request combo",
+                    "script3_favour_combo",
+                    use_variant=False
+                )
         
         # Check for Script 9: Favour request trigger on acknowledgments
         script9_keywords = [
