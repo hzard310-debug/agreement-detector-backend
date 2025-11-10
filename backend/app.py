@@ -69,6 +69,13 @@ def mark_favour_request(contact_key: str):
     if contact_key:
         favour_request_contacts[contact_key] = True
 
+def sanitize_relationship_terms(text: str) -> str:
+    if not text:
+        return text
+    sanitized = re.sub(r'\b(son|sons|daughter|daughters)\b', '', text, flags=re.IGNORECASE)
+    sanitized = re.sub(r'\s{2,}', ' ', sanitized)
+    return sanitized.strip()
+
 def record_script_sent(contact_key: str, script_id: str):
     if not contact_key or not script_id or not script_id.startswith("script"):
         return
@@ -1131,6 +1138,7 @@ def get_response():
                 final_text = select_variant(contact_id, base_text)
             else:
                 final_text = base_text
+            final_text = sanitize_relationship_terms(final_text)
             latest_fingerprint_source = latest_norm or ((latest_msg or "").lower().strip()) or "(none)"
             latest_hash = hashlib.sha1(latest_fingerprint_source.encode("utf-8")).hexdigest()[:12]
             script_id_local = script_id_override or "special"
@@ -2128,7 +2136,7 @@ def get_response():
         # payment_request_was_sent already set above (checks entire conversation, not just previous message)
         
         # Keywords for EXPLICITLY asking for payment details (including who to pay)
-        asking_for_details_keywords = ["send me the details", "send details", "what are the details", "what details", "what's the details", "what's the payment details", "payment details", "bank details", "account details", "send it", "send them", "what do i need", "what information", "what info", "i need the details", "i need the payment details", "i need the bank details", "i need the account details", "can you send the details", "can you send me the details", "send the payment details", "send the bank details", "send the account details", "who am i paying", "who am i paying it to", "who do i pay", "who do i pay it to", "who should i pay", "who should i pay it to", "who to pay", "pay to who", "pay to whom", "who to send it to", "who to send to", "send to who", "send to whom", "who do i send it to", "who do i send to", "who should i send it to", "who should i send to"]
+        asking_for_details_keywords = ["send me the details", "send details", "what are the details", "what details", "what's the details", "what's the payment details", "payment details", "bank details", "account details", "send it", "send them", "what do i need", "what information", "what info", "i need the details", "i need the payment details", "i need the bank details", "i need the account details", "can you send the details", "can you send me the details", "send the payment details", "send the bank details", "send the account details", "who am i paying", "who am i paying it to", "who do i pay", "who do i pay it to", "who should i pay", "who should i pay it to", "who to pay", "pay to who", "pay to whom", "who to send it to", "who to send to", "send to who", "send to whom", "who do i send it to", "who do i send to", "who should i send it to", "who should i send to", "where would you like me to send it", "where should i send it", "where do you want me to send it", "where would you like me to send the money"]
         
         # Keywords for agreeing to make the payment (explicit agreement)
         agreement_to_pay_keywords = ["sure", "ok", "okay", "yes", "of course", "absolutely", "yeah", "yep", "yup", "go ahead", "i can do that", "i'll do it", "i can help", "i'll help", "i'll make the payment", "i can make the payment", "i'll transfer", "i can transfer"]
@@ -3026,6 +3034,10 @@ Analyze the conversation and provide an ALTERNATIVE response.
                 "]+", flags=re.UNICODE)
             decision_response = emoji_pattern.sub('', decision_response).strip()
         
+        # Final relational term sanitization
+        if decision_action == "SEND" and decision_response:
+            decision_response = sanitize_relationship_terms(decision_response)
+
         # Format response for Android app
         result = {
             "action": decision_action,
