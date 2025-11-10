@@ -76,10 +76,21 @@ def sanitize_relationship_terms(text: str) -> str:
     sanitized = re.sub(r'\s{2,}', ' ', sanitized)
     return sanitized.strip()
 
+def strip_leading_greeting(text: str) -> str:
+    if not text:
+        return text
+    pattern = re.compile(r'^\s*(?:hi|hello|hey|hiya|morning|afternoon|evening)\b[\s,!\.-]*', re.IGNORECASE)
+    stripped = pattern.sub('', text, count=1)
+    return stripped.lstrip()
+
 def record_script_sent(contact_key: str, script_id: str):
     if not contact_key or not script_id or not script_id.startswith("script"):
         return
     scripts_sent_by_contact.setdefault(contact_key, set()).add(script_id)
+
+def has_favour_request_been_sent(contact_key: str) -> bool:
+    scripts = scripts_sent_by_contact.get(contact_key, set())
+    return any(script.startswith("script9") for script in scripts)
 
 def script_already_sent(contact_key: str, script_id: str) -> bool:
     if not contact_key or not script_id or not script_id.startswith("script"):
@@ -1372,15 +1383,15 @@ def get_response():
         if needs_help_decline(latest_lower):
             return send_immediate_response("Thanks, I'm all sorted with it now but really appreciate you offering.", "Special case: help offer decline", "special_help_decline")
 
-        if previous_was_save and is_reaction_to_save_number(latest_lower):
+        if (not script9_already_sent) and previous_was_save and is_reaction_to_save_number(latest_lower):
             favour_text = select_variant(contact_id, FAVOUR_VARIANTS[0])
             return send_immediate_response(favour_text, "Special case: reaction to save number", "script9")
 
-        if previous_was_favour and acknowledges_no_worries(latest_lower):
+        if (not script9_already_sent) and previous_was_favour and acknowledges_no_worries(latest_lower):
             favour_text = select_variant(contact_id, FAVOUR_VARIANTS[0])
             return send_immediate_response(favour_text, "Special case: favour follow-up", "script9_followup")
 
-        if acknowledges_save_anything_else(latest_lower):
+        if (not script9_already_sent) and acknowledges_save_anything_else(latest_lower):
             favour_text = select_variant(contact_id, FAVOUR_VARIANTS[0])
             return send_immediate_response(favour_text, "Special case: anything else needed", "script9_extra")
 
@@ -1809,7 +1820,7 @@ def get_response():
         latest_lower = latest_msg.lower() if latest_msg else ""
         contains_agreement_keyword_9 = any(keyword in latest_lower for keyword in script9_keywords)
         
-        script9_already_sent = favour_request_sent or script_already_sent(contact_key, "script9")
+        script9_already_sent = favour_request_sent or has_favour_request_been_sent(contact_key)
         
         # Send Script 9 once per conversation when acknowledgments arrive
         if (not script9_already_sent) and contains_agreement_keyword_9:
@@ -1852,6 +1863,29 @@ def get_response():
                 "timestamp": datetime.now().isoformat()
             }), 200
         
+        asking_for_details_keywords = [
+            "send me the details", "send details", "what are the details", "what details", "what's the details",
+            "what's the payment details", "payment details", "bank details", "account details", "send it",
+            "send them", "what do i need", "what information", "what info", "i need the details",
+            "i need the payment details", "i need the bank details", "i need the account details",
+            "can you send the details", "can you send me the details", "send the payment details",
+            "send the bank details", "send the account details", "who am i paying", "who am i paying it to",
+            "who do i pay", "who do i pay it to", "who should i pay", "who should i pay it to", "who to pay",
+            "pay to who", "pay to whom", "who to send it to", "who to send to", "send to who", "send to whom",
+            "who do i send it to", "who do i send to", "who should i send it to", "who should i send to",
+            "where would you like me to send it", "where should i send it", "where do you want me to send it",
+            "where would you like me to send the money"
+        ]
+
+        agreement_to_pay_keywords = [
+            "sure", "ok", "okay", "yes", "of course", "absolutely", "yeah", "yep", "yup", "go ahead",
+            "i can do that", "i'll do it", "i can help", "i'll help", "i'll make the payment", "i can make the payment",
+            "i'll transfer", "i can transfer", "anything for you", "anything for u", "anything you need",
+            "anything you need me to do", "anything i can do", "i'll sort it", "i'll sort that",
+            "i can sort it", "can do", "consider it done", "i've got you", "i got you", "i'll cover it",
+            "i can cover it", "i'll send it", "i can send it"
+        ]
+
         # Check for Script 12: Payment request after "Could you do me a favour please?"
         # Check if previous message from "you" was Script 9
         previous_was_favour_request = favour_request_sent
@@ -1879,6 +1913,7 @@ def get_response():
         ]
         latest_lower = latest_msg.lower() if latest_msg else ""
         contains_agreement_keyword = any(keyword in latest_lower for keyword in script12_keywords)
+        contains_detail_request = any(keyword in latest_lower for keyword in asking_for_details_keywords)
         
         # Check if they said "no" to the favour request - ignore it
         if previous_was_favour_request:
@@ -1898,7 +1933,7 @@ def get_response():
                 }), 200
         
         # If both conditions are met, use Script 12 directly
-        if previous_was_favour_request and contains_agreement_keyword and not script_already_sent(contact_key, "script12"):
+        if previous_was_favour_request and contains_agreement_keyword and not contains_detail_request and not script_already_sent(contact_key, "script12"):
             payment_message = "I need to make a payment today but can't for 24h until my new number is added to my online banking. Would you be able to make the transfer on my behalf if I send you the details and I'll pay you back tomorrow please? Total is £1,745 if that's okay?"
             
             # Detect kisses and append if present
@@ -2134,12 +2169,6 @@ def get_response():
         # Check for Script 13: Payment details after payment request
         # ONLY send payment details if they EXPLICITLY ask for them OR agree to make the payment
         # payment_request_was_sent already set above (checks entire conversation, not just previous message)
-        
-        # Keywords for EXPLICITLY asking for payment details (including who to pay)
-        asking_for_details_keywords = ["send me the details", "send details", "what are the details", "what details", "what's the details", "what's the payment details", "payment details", "bank details", "account details", "send it", "send them", "what do i need", "what information", "what info", "i need the details", "i need the payment details", "i need the bank details", "i need the account details", "can you send the details", "can you send me the details", "send the payment details", "send the bank details", "send the account details", "who am i paying", "who am i paying it to", "who do i pay", "who do i pay it to", "who should i pay", "who should i pay it to", "who to pay", "pay to who", "pay to whom", "who to send it to", "who to send to", "send to who", "send to whom", "who do i send it to", "who do i send to", "who should i send it to", "who should i send to", "where would you like me to send it", "where should i send it", "where do you want me to send it", "where would you like me to send the money"]
-        
-        # Keywords for agreeing to make the payment (explicit agreement)
-        agreement_to_pay_keywords = ["sure", "ok", "okay", "yes", "of course", "absolutely", "yeah", "yep", "yup", "go ahead", "i can do that", "i'll do it", "i can help", "i'll help", "i'll make the payment", "i can make the payment", "i'll transfer", "i can transfer"]
         
         latest_lower = latest_msg.lower() if latest_msg else ""
         is_asking_for_details = any(keyword in latest_lower for keyword in asking_for_details_keywords)
@@ -3034,8 +3063,10 @@ Analyze the conversation and provide an ALTERNATIVE response.
                 "]+", flags=re.UNICODE)
             decision_response = emoji_pattern.sub('', decision_response).strip()
         
-        # Final relational term sanitization
+        # Final greeting/relationship sanitization for AI-generated content
         if decision_action == "SEND" and decision_response:
+            if script_id == "script11":
+                decision_response = strip_leading_greeting(decision_response)
             decision_response = sanitize_relationship_terms(decision_response)
 
         # Format response for Android app
