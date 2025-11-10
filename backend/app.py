@@ -1768,23 +1768,7 @@ def get_response():
                     "timestamp": datetime.now().isoformat()
                 }), 200
         
-        # Check for Script 9: Favour request after apologetic message about changing numbers
-        # Check if previous message from "you" was an apologetic message about changing numbers
-        previous_was_apologetic = False
-        if parsed_turns:
-            for turn in reversed(parsed_turns):
-                role = (turn.get('role') or '').lower()
-                text = turn.get('text') or ''
-                if role == 'you' and text.strip():
-                    # Check if it's an apologetic message about changing numbers
-                    text_lower = text.lower()
-                    if ("last time" in text_lower and ("change numbers" in text_lower or "change number" in text_lower or "promise" in text_lower)) or \
-                       ("sorry" in text_lower and ("change numbers" in text_lower or "change number" in text_lower)) or \
-                       ("all worked out" in text_lower and "last time" in text_lower):
-                        previous_was_apologetic = True
-                    break
-        
-        # Check if current message contains agreement/acknowledgment keywords for Script 9
+        # Check for Script 9: Favour request trigger on acknowledgments
         script9_keywords = [
             "ok", "okay", "ok ok", "okay okay", "ok thanks", "okay thanks", "fine", "sure",
             "alright", "will do", "got it", "done", "sorted", "thanks", "thank you",
@@ -1793,8 +1777,10 @@ def get_response():
         latest_lower = latest_msg.lower() if latest_msg else ""
         contains_agreement_keyword_9 = any(keyword in latest_lower for keyword in script9_keywords)
         
-        # If both conditions are met, use Script 9 directly
-        if previous_was_apologetic and contains_agreement_keyword_9:
+        script9_already_sent = favour_request_sent
+        
+        # Send Script 9 once per conversation when acknowledgments arrive
+        if (not script9_already_sent) and contains_agreement_keyword_9:
             favour_message = "Could you do me a favour please?"
             
             # Detect kisses and append if present
@@ -1823,10 +1809,13 @@ def get_response():
             while favour_message.endswith('.'):
                 favour_message = favour_message[:-1].rstrip()
             
+            favour_request_sent = True
+            mark_favour_request(contact_key)
+            
             return jsonify({
                 "action": "SEND",
                 "response": favour_message,
-                "reasoning": "Script 9: Previous message was apologetic about changing numbers and current message shows agreement/acknowledgment",
+                "reasoning": "Script 9: First agreement/acknowledgment message detected in conversation",
                 "timestamp": datetime.now().isoformat()
             }), 200
         
